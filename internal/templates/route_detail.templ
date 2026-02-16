@@ -1,0 +1,79 @@
+package templates
+
+import "fmt"
+
+// RouteDetailData holds the data for a specific route's detail page.
+type RouteDetailData struct {
+	Page           Page
+	RouteID        string
+	RouteShort     string
+	RouteLong      string
+	RouteColor     string
+	RouteTextColor string
+	RouteType      int
+	Directions     []DirectionStops
+	Alerts         []AlertDisplay
+}
+
+// DirectionStops holds stops for one direction of a route.
+type DirectionStops struct {
+	DirectionID   int
+	DirectionName string
+	Stops         []RouteStop
+}
+
+// RouteStop is a stop along a route.
+type RouteStop struct {
+	StopID   string
+	StopName string
+	Sequence int
+}
+
+// RouteDetailPage renders the detail page for a single route.
+templ RouteDetailPage(data RouteDetailData) {
+	@Layout(data.Page) {
+		<section aria-label={ fmt.Sprintf("Route %s details", data.RouteShort) }>
+			<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">
+				<span
+					class="route-badge"
+					style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(data.RouteColor), routeTextColorOrDefault(data.RouteTextColor)) }
+				>
+					{ data.RouteShort }
+				</span>
+				<div>
+					<h2 style="margin:0">{ data.RouteLong }</h2>
+					<span class="distance">{ routeTypeName(data.RouteType) }</span>
+				</div>
+			</div>
+			<div style="margin-bottom:1rem">
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("https://www.metrotransit.org/route/%s", data.RouteID)) }
+					target="_blank"
+					rel="noopener"
+					class="btn"
+				>
+					Show on Map
+				</a>
+				<a href="/routes" style="margin-left:0.75rem;color:var(--accent)">Back to routes</a>
+			</div>
+			if len(data.Alerts) > 0 {
+				@AlertSection(data.Alerts)
+			}
+			for _, dir := range data.Directions {
+				<h3>{ dir.DirectionName }</h3>
+				<ol role="list" aria-label={ fmt.Sprintf("Stops %s", dir.DirectionName) } style="padding-left:1.5rem">
+					for _, stop := range dir.Stops {
+						<li style="margin-bottom:0.5rem">
+							<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", stop.StopID)) }>
+								{ stop.StopName }
+							</a>
+						</li>
+					}
+				</ol>
+			}
+			if len(data.Directions) == 0 {
+				<p>No schedule data available for this route today.</p>
+			}
+		</section>
+	}
+}

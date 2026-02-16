@@ -1,0 +1,51 @@
+# Go
+/gobus
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# GTFS data
+/data/
+*.zip
+
+# Generated templ files
+*_templ.go
+
+# Generated protobuf files
+*.pb.go
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (e2e tests)
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+e2e/*.png
+
+# Build
+/dist/
+/tmp/

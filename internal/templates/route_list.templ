@@ -1,0 +1,87 @@
+package templates
+
+import "fmt"
+
+// RouteListData holds the data for the route explorer page.
+type RouteListData struct {
+	Page   Page
+	Routes []RouteInfo
+}
+
+// RouteInfo holds display data for a route in the list.
+type RouteInfo struct {
+	RouteID        string
+	RouteShort     string
+	RouteLong      string
+	RouteColor     string
+	RouteTextColor string
+	RouteType      int // 0=tram, 1=subway, 2=rail, 3=bus
+}
+
+// RouteListPage renders the route explorer page.
+templ RouteListPage(data RouteListData) {
+	@Layout(data.Page) {
+		<section aria-label="Route explorer">
+			<h2>Route Explorer</h2>
+			<label for="route-search">Search routes:</label>
+			<input
+				type="search"
+				id="route-search"
+				placeholder="Route number or name"
+				aria-label="Filter routes by number or name"
+				oninput="filterRoutes(this.value)"
+				style="margin-bottom:1rem"
+			/>
+			<div id="route-list" role="list" aria-label="All routes">
+				for _, route := range data.Routes {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/routes/%s", route.RouteID)) }
+						class="card"
+						role="listitem"
+						data-route-short={ route.RouteShort }
+						data-route-long={ route.RouteLong }
+						style="display:flex;align-items:center;gap:0.75rem;text-decoration:none;color:inherit"
+					>
+						<span
+							class="route-badge"
+							style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(route.RouteColor), routeTextColorOrDefault(route.RouteTextColor)) }
+						>
+							{ route.RouteShort }
+						</span>
+						<span>
+							{ route.RouteLong }
+							<span class="distance">{ routeTypeName(route.RouteType) }</span>
+						</span>
+					</a>
+				}
+			</div>
+		</section>
+		<script>
+			function filterRoutes(q) {
+				q = q.toLowerCase();
+				document.querySelectorAll('#route-list [role="listitem"]').forEach(function(el) {
+					var short = (el.getAttribute('data-route-short') || '').toLowerCase();
+					var long = (el.getAttribute('data-route-long') || '').toLowerCase();
+					el.style.display = (!q || short.indexOf(q) !== -1 || long.indexOf(q) !== -1) ? '' : 'none';
+				});
+			}
+		</script>
+	}
+}
+
+func routeTypeName(t int) string {
+	switch t {
+	case 0:
+		return "Light Rail"
+	case 1:
+		return "Subway"
+	case 2:
+		return "Commuter Rail"
+	case 3:
+		return "Bus"
+	case 4:
+		return "Ferry"
+	default:
+		return ""
+	}
+}

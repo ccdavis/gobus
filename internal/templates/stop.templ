@@ -1,0 +1,77 @@
+package templates
+
+import "fmt"
+
+// StopDetailData holds the data for a stop detail page.
+type StopDetailData struct {
+	Page       Page
+	StopID     string
+	StopName   string
+	StopCode   string
+	Lat        float64
+	Lon        float64
+	Departures []DepartureInfo
+	Interval   string // e.g. "Every 20 min until 8:00 PM" or empty
+	Alerts     []AlertDisplay
+}
+
+// StopDetailPage renders the detail page for a single stop.
+templ StopDetailPage(data StopDetailData) {
+	@Layout(data.Page) {
+		<section aria-label={ fmt.Sprintf("Stop %s details", data.StopName) }>
+			<h2 data-testid="stop-name">{ data.StopName }</h2>
+			if data.StopCode != "" {
+				<p class="distance">Stop #{ data.StopCode }</p>
+			}
+			<div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">
+				<a href="/nearby" style="color:var(--accent)">Back to nearby</a>
+				<button
+					id="save-stop-btn"
+					class="btn-secondary"
+					data-stop-id={ data.StopID }
+					data-stop-name={ data.StopName }
+					data-stop-lat={ fmt.Sprintf("%.6f", data.Lat) }
+					data-stop-lon={ fmt.Sprintf("%.6f", data.Lon) }
+					aria-label={ fmt.Sprintf("Save %s to your locations", data.StopName) }
+				>
+					Save stop
+				</button>
+			</div>
+			if len(data.Alerts) > 0 {
+				@AlertSection(data.Alerts)
+			}
+			if data.Interval != "" {
+				<p class="interval">{ data.Interval }</p>
+			}
+			<div
+				hx-ext="sse"
+				sse-connect={ fmt.Sprintf("/sse/departures/%s", data.StopID) }
+			>
+				<div
+					id="departure-list"
+					sse-swap="departures"
+					hx-swap="innerHTML"
+					aria-live="polite"
+					aria-label={ fmt.Sprintf("Departures from %s", data.StopName) }
+				>
+					@DepartureList(data.Departures)
+				</div>
+			</div>
+		</section>
+	}
+}
+
+// DepartureList renders a list of departures (used for initial render and SSE updates).
+templ DepartureList(departures []DepartureInfo) {
+	if len(departures) > 0 {
+		<ul role="list" style="list-style:none;padding:0;margin:0">
+			for _, dep := range departures {
+				<li class="card" style="margin-bottom:0.5rem">
+					@DepartureRow(dep)
+				</li>
+			}
+		</ul>
+	} else {
+		<p>No upcoming departures at this stop.</p>
+	}
+}

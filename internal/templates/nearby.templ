@@ -1,0 +1,164 @@
+package templates
+
+import "fmt"
+
+// AlertDisplay holds display data for a service alert.
+type AlertDisplay struct {
+	HeaderText string
+	DescText   string
+	Effect     string // Human-readable: "Detour", "No Service", etc.
+}
+
+// NearbyData holds the data for the nearby departures page.
+type NearbyData struct {
+	Page     Page
+	Stops    []NearbyStop
+	HasStops bool
+	Query    string // Manual address/cross-street query
+	Lat      string
+	Lon      string
+	Alerts   []AlertDisplay
+}
+
+// NearbyStop is a stop with its departures for the nearby view.
+type NearbyStop struct {
+	StopID       string
+	StopName     string
+	Distance     string // e.g. "350 m" or "0.2 mi"
+	Departures   []DepartureInfo
+	ShowMore     bool // True if there are more than shown
+}
+
+// DepartureInfo holds departure display data.
+type DepartureInfo struct {
+	RouteID       string
+	RouteShort    string
+	RouteColor    string
+	RouteTextColor string
+	Headsign      string
+	Scheduled     string // e.g. "3:45 PM"
+	Realtime      string // e.g. "3:47 PM" or empty if no realtime
+	MinutesAway   int
+	IsRealtime    bool
+	IsLate        bool
+}
+
+// NearbyPage renders the full nearby departures page.
+templ NearbyPage(data NearbyData) {
+	@Layout(data.Page) {
+		<section aria-label="Nearby departures">
+			<h2>Nearby Departures</h2>
+			<div id="saved-locations" aria-label="Saved locations" hidden></div>
+			<div id="location-status" aria-live="polite"></div>
+			<form id="nearby-form" action="/nearby" method="get">
+				<input type="hidden" id="lat" name="lat" value={ data.Lat }/>
+				<input type="hidden" id="lon" name="lon" value={ data.Lon }/>
+				<div id="manual-entry" if data.Lat == "" && data.Lon == "" && data.Query == "" { hidden } >
+					<label for="address">Enter address or cross streets:</label>
+					<div style="display:flex;gap:0.5rem;margin-top:0.25rem">
+						<input type="text" id="address" name="q" placeholder="e.g. Lake &amp; Lyndale" value={ data.Query }/>
+						<button type="submit">Find Stops</button>
+					</div>
+				</div>
+			</form>
+			if len(data.Alerts) > 0 {
+				@AlertSection(data.Alerts)
+			}
+			<div id="stop-list" aria-live="polite">
+				if data.HasStops {
+					@NearbyStopList(data.Stops)
+				} else if data.Lat != "" || data.Query != "" {
+					<p>No stops found nearby. Try a different location.</p>
+				} else {
+					<p class="loading">Getting your location…</p>
+				}
+			</div>
+		</section>
+	}
+}
+
+// NearbyStopList renders just the stop list (used for HTMX partial updates too).
+templ NearbyStopList(stops []NearbyStop) {
+	for _, stop := range stops {
+		<article class="card" data-testid="stop-card">
+			<div style="display:flex;justify-content:space-between;align-items:baseline">
+				<h3>
+					<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", stop.StopID)) }>{ stop.StopName }</a>
+				</h3>
+				<span class="distance" data-testid="stop-distance">{ stop.Distance }</span>
+			</div>
+			if len(stop.Departures) > 0 {
+				<ul role="list" aria-label={ fmt.Sprintf("Departures from %s", stop.StopName) } style="list-style:none;padding:0;margin:0">
+					for _, dep := range stop.Departures {
+						<li style="margin-bottom:0.75rem">
+							@DepartureRow(dep)
+						</li>
+					}
+				</ul>
+			} else {
+				<p class="loading">No upcoming departures</p>
+			}
+		</article>
+	}
+}
+
+// DepartureRow renders a single departure entry.
+templ DepartureRow(dep DepartureInfo) {
+	<div style="display:flex;align-items:center;gap:0.75rem">
+		<a
+			href={ templ.SafeURL(fmt.Sprintf("/routes/%s", dep.RouteID)) }
+			class="route-badge"
+			style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(dep.RouteColor), routeTextColorOrDefault(dep.RouteTextColor)) }
+			aria-label={ fmt.Sprintf("Route %s", dep.RouteShort) }
+		>
+			{ dep.RouteShort }
+		</a>
+		<div>
+			<div>{ dep.Headsign }</div>
+			<div>
+				if dep.IsRealtime {
+					<span class={ "departure-time", templ.KV("departure-late", dep.IsLate) }>{ dep.Realtime }</span>
+					<span class="departure-scheduled">
+						(sched. { dep.Scheduled })
+					</span>
+				} else {
+					<span class="departure-time">{ dep.Scheduled }</span>
+				}
+				<span aria-label={ fmt.Sprintf("%d minutes away", dep.MinutesAway) }>
+					— { fmt.Sprintf("%d min", dep.MinutesAway) }
+				</span>
+			</div>
+		</div>
+	</div>
+}
+
+// AlertSection renders service alerts with full text.
+templ AlertSection(alerts []AlertDisplay) {
+	<section aria-label="Service alerts" class="alerts-section">
+		for _, alert := range alerts {
+			<div class="alert-banner" role="alert">
+				if alert.Effect != "" && alert.Effect != "Alert" {
+					<strong class="alert-effect">{ alert.Effect }:</strong>
+				}
+				<strong>{ alert.HeaderText }</strong>
+				if alert.DescText != "" && alert.DescText != alert.HeaderText {
+					<p class="alert-desc">{ alert.DescText }</p>
+				}
+			</div>
+		}
+	</section>
+}
+
+func routeColorOrDefault(c string) string {
+	if c == "" {
+		return "0f3460"
+	}
+	return c
+}
+
+func routeTextColorOrDefault(c string) string {
+	if c == "" {
+		return "ffffff"
+	}
+	return c
+}

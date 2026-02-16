@@ -1,0 +1,65 @@
+package templates
+
+// Page is the base data passed to all page templates.
+type Page struct {
+	Title       string
+	CurrentPath string // For nav highlighting
+}
+
+// Layout renders the full HTML page shell with accessible landmarks.
+templ Layout(page Page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ page.Title } — GoBus</title>
+			<link rel="stylesheet" href="/static/css/main.css"/>
+			<link rel="manifest" href="/manifest.json"/>
+			<meta name="theme-color" content="#1a1a2e"/>
+			<meta name="description" content="Real-time Metro Transit departures for Minneapolis/St. Paul"/>
+			<link rel="apple-touch-icon" href="/static/icons/icon-192.png"/>
+			<meta name="apple-mobile-web-app-capable" content="yes"/>
+			<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+			<meta name="apple-mobile-web-app-title" content="GoBus"/>
+		</head>
+		<body>
+			<a href="#main" class="skip-link">Skip to main content</a>
+			<header role="banner">
+				<nav aria-label="Main navigation">
+					<a
+						href="/nearby"
+						if page.CurrentPath == "/nearby" {
+							aria-current="page"
+						}
+					>Nearby</a>
+					<a
+						href="/routes"
+						if page.CurrentPath == "/routes" {
+							aria-current="page"
+						}
+					>Route Explorer</a>
+				</nav>
+				<h1>GoBus</h1>
+			</header>
+			<main id="main" role="main">
+				{ children... }
+			</main>
+			<div id="install-banner" class="install-banner" hidden role="complementary" aria-label="Install app">
+				<p>Add GoBus to your home screen for quick access.</p>
+				<button id="install-btn">Install</button>
+				<button id="install-dismiss" class="btn-secondary">Not now</button>
+			</div>
+			<div id="idle-banner" class="idle-banner" hidden aria-live="assertive" role="alert">
+				<p>Real-time updates paused due to inactivity.</p>
+				<button id="wake-up-btn">Tap to refresh</button>
+			</div>
+			<footer role="contentinfo">
+				<p>GoBus — Metro Transit departure info</p>
+			</footer>
+			<script src="/static/js/htmx.min.js"></script>
+			<script src="/static/js/htmx-sse.js"></script>
+			<script src="/static/js/app.js"></script>
+		</body>
+	</html>
+}
