@@ -1,6 +1,9 @@
 package templates
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+)
 
 // AlertDisplay holds display data for a service alert.
 type AlertDisplay struct {
@@ -11,36 +14,126 @@ type AlertDisplay struct {
 
 // NearbyData holds the data for the nearby departures page.
 type NearbyData struct {
-	Page     Page
-	Stops    []NearbyStop
-	HasStops bool
-	Query    string // Manual address/cross-street query
-	Lat      string
-	Lon      string
-	Alerts   []AlertDisplay
+	Page      Page
+	View      string // "routes" or "stops"
+	Routes    []RouteNearbyRow
+	StopViews []StopViewData
+	HasStops  bool
+	HasMore   bool
+	MoreURL   string
+	Query       string // Manual address/cross-street query
+	Lat         string
+	Lon         string
+	SearchError   string         // Error message from cross-street search
+	SearchResults []SearchResult // Disambiguation options when search is ambiguous
+	Alerts        []AlertDisplay
 }
 
-// NearbyStop is a stop with its departures for the nearby view.
-type NearbyStop struct {
-	StopID       string
-	StopName     string
-	Distance     string // e.g. "350 m" or "0.2 mi"
-	Departures   []DepartureInfo
-	ShowMore     bool // True if there are more than shown
+// SearchResult is a disambiguation option from cross-street search.
+type SearchResult struct {
+	Name string
+	Lat  string
+	Lon  string
 }
 
-// DepartureInfo holds departure display data.
-type DepartureInfo struct {
-	RouteID       string
-	RouteShort    string
-	RouteColor    string
+// RouteNearbyRow holds data for a single route in the routes-first nearby view.
+type RouteNearbyRow struct {
+	RouteID        string
+	RouteShort     string
+	RouteColor     string
 	RouteTextColor string
-	Headsign      string
-	Scheduled     string // e.g. "3:45 PM"
-	Realtime      string // e.g. "3:47 PM" or empty if no realtime
-	MinutesAway   int
-	IsRealtime    bool
-	IsLate        bool
+	RouteName      string // headsign / destination
+	DirectionText  string
+	DirectionID    int
+	StopID         string
+	StopName       string
+
+	Scheduled   string
+	Realtime    string
+	MinutesAway int
+	IsRealtime  bool
+	IsLate      bool
+
+	LaterTimes []LaterArrival
+	Interval   string // "Every 20 min until 8:00 PM" or ""
+
+	// Alt direction (cross-stop pairing)
+	HasAlt           bool
+	AltDirectionText string
+	AltStopID        string
+	AltStopName      string
+	AltRouteName     string
+	AltScheduled     string
+	AltRealtime      string
+	AltMinutesAway   int
+	AltIsRealtime    bool
+	AltIsLate        bool
+	AltLaterTimes    []LaterArrival
+	AltInterval      string
+}
+
+// LaterArrival holds a later departure time for a route group.
+type LaterArrival struct {
+	Time        string
+	MinutesAway int
+	IsRealtime  bool
+}
+
+// StopViewData holds data for a single stop in the stops-centric view.
+type StopViewData struct {
+	StopID      string
+	StopName    string
+	StopDesc    string // Disambiguation label, e.g. "Southbound side"
+	Distance    string
+	RouteGroups []StopRouteGroup
+}
+
+// StopRouteGroup is a route at a stop with its upcoming departures.
+type StopRouteGroup struct {
+	RouteID        string
+	RouteShort     string
+	RouteColor     string
+	RouteTextColor string
+	DirectionText  string
+	Headsign       string
+	Times          []StopRouteDeparture
+}
+
+// StopRouteDeparture is a single departure time within a route group.
+type StopRouteDeparture struct {
+	Scheduled   string
+	Realtime    string
+	MinutesAway int
+	IsRealtime  bool
+	IsLate      bool
+}
+
+//DepartureInfo holds departure display data.
+type DepartureInfo struct {
+	RouteID        string
+	RouteShort     string
+	RouteColor     string
+	RouteTextColor string
+	Headsign       string
+	DirectionText  string // "Eastbound", "Westbound", etc.
+	DirectionID    int
+	Scheduled      string // e.g. "3:45 PM"
+	Realtime       string // e.g. "3:47 PM" or empty if no realtime
+	MinutesAway    int
+	IsRealtime     bool
+	IsLate         bool
+
+	// Alternate direction (cross-stop pairing in nearby view)
+	HasAlt           bool
+	AltDirectionText string
+	AltHeadsign      string
+	AltScheduled     string
+	AltRealtime      string
+	AltMinutesAway   int
+	AltIsRealtime    bool
+	AltIsLate        bool
+	AltStopName      string // Name of the stop for the alt direction
+	PrimaryStopName  string // Name of this departure's stop (for comparison)
 }
 
 // NearbyPage renders the full nearby departures page.
@@ -53,6 +146,7 @@ templ NearbyPage(data NearbyData) {
 			<form id="nearby-form" action="/nearby" method="get">
 				<input type="hidden" id="lat" name="lat" value={ data.Lat }/>
 				<input type="hidden" id="lon" name="lon" value={ data.Lon }/>
+				<input type="hidden" id="view" name="view" value={ data.View }/>
 				<div id="manual-entry" if data.Lat == "" && data.Lon == "" && data.Query == "" { hidden } >
 					<label for="address">Enter address or cross streets:</label>
 					<div style="display:flex;gap:0.5rem;margin-top:0.25rem">
@@ -61,12 +155,71 @@ templ NearbyPage(data NearbyData) {
 					</div>
 				</div>
 			</form>
+			if data.SearchError != "" {
+				<p class="search-error" role="alert">{ data.SearchError }</p>
+			}
+			if len(data.SearchResults) > 0 {
+				<div class="search-disambig" role="region" aria-label="Did you mean">
+					<p>Multiple locations match. Which did you mean?</p>
+					<ul role="list">
+						for _, sr := range data.SearchResults {
+							<li>
+								<a href={ templ.SafeURL(fmt.Sprintf("/nearby?view=%s&lat=%s&lon=%s&q=%s", data.View, sr.Lat, sr.Lon, url.QueryEscape(data.Query))) }>
+									{ sr.Name }
+								</a>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			if data.Lat != "" {
+				<nav aria-label="View options" class="nearby-tabs">
+					<a
+						href={ templ.SafeURL(nearbyTabURL("routes", data.Lat, data.Lon, data.Query)) }
+						class="nearby-tab"
+						if data.View == "routes" {
+							aria-current="page"
+						}
+					>
+						Routes nearby
+					</a>
+					<a
+						href={ templ.SafeURL(nearbyTabURL("stops", data.Lat, data.Lon, data.Query)) }
+						class="nearby-tab"
+						if data.View == "stops" {
+							aria-current="page"
+						}
+					>
+						Stops nearby
+					</a>
+				</nav>
+			}
 			if len(data.Alerts) > 0 {
 				@AlertSection(data.Alerts)
 			}
 			<div id="stop-list" aria-live="polite">
 				if data.HasStops {
-					@NearbyStopList(data.Stops)
+					if data.View == "stops" {
+						@NearbyStopsViewList(data.StopViews)
+					} else {
+						<div id="route-list">
+							@RouteNearbyList(data.Routes)
+						</div>
+						<div id="load-more">
+							if data.HasMore {
+								<button
+									class="btn-more"
+									hx-get={ data.MoreURL }
+									hx-target="#route-list"
+									hx-swap="beforeend"
+									hx-indicator="#loading-more"
+								>
+									Show more routes
+								</button>
+								<span id="loading-more" class="htmx-indicator loading">Loading…</span>
+							}
+						</div>
+					}
 				} else if data.Lat != "" || data.Query != "" {
 					<p>No stops found nearby. Try a different location.</p>
 				} else {
@@ -77,8 +230,126 @@ templ NearbyPage(data NearbyData) {
 	}
 }
 
-// NearbyStopList renders just the stop list (used for HTMX partial updates too).
-templ NearbyStopList(stops []NearbyStop) {
+// RouteNearbyList renders the flat route-first view of nearby departures.
+templ RouteNearbyList(routes []RouteNearbyRow) {
+	for _, r := range routes {
+		@routeNearbyRow(r)
+	}
+}
+
+// RouteNearbyPartial renders additional routes for the "More" HTMX request.
+templ RouteNearbyPartial(routes []RouteNearbyRow, hasMore bool, moreURL string) {
+	for _, r := range routes {
+		@routeNearbyRow(r)
+	}
+	<div id="load-more" hx-swap-oob="true">
+		if hasMore {
+			<button
+				class="btn-more"
+				hx-get={ moreURL }
+				hx-target="#route-list"
+				hx-swap="beforeend"
+				hx-indicator="#loading-more"
+			>
+				Show more routes
+			</button>
+			<span id="loading-more" class="htmx-indicator loading">Loading…</span>
+		}
+	</div>
+}
+
+// routeNearbyRow renders a single route row with direction toggle.
+templ routeNearbyRow(r RouteNearbyRow) {
+	<article
+		class={ "route-nearby-row", templ.KV("route-nearby-row--has-alt", r.HasAlt) }
+		aria-label={ fmt.Sprintf("Route %s %s", r.RouteShort, r.DirectionText) }
+		data-testid="route-row"
+	>
+		if r.HasAlt {
+			<div class="direction-group">
+				<div class="direction-primary">
+					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, r.AltDirectionText, r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID))
+				</div>
+				<div class="direction-alt" hidden>
+					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.AltDirectionText, r.DirectionText, r.AltStopName, r.AltScheduled, r.AltRealtime, r.AltMinutesAway, r.AltIsRealtime, r.AltIsLate, r.AltLaterTimes, r.AltInterval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", altStopID(r.AltStopID, r.StopID), r.RouteID, 1-r.DirectionID))
+				</div>
+			</div>
+		} else {
+			@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, "", r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, false, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID))
+		}
+	</article>
+}
+
+// routeRowContent renders the inner content of a route row direction.
+templ routeRowContent(routeShort string, routeColor string, routeTextColor string, directionText string, altDirectionText string, stopName string, scheduled string, realtime string, minutesAway int, isRealtime bool, isLate bool, laterTimes []LaterArrival, interval string, hasToggle bool, laterURL string) {
+	<div class="route-row-line1">
+		if hasToggle {
+			<button
+				type="button"
+				class="direction-toggle"
+				aria-label={ fmt.Sprintf("Route %s, showing %s. Tap to switch to %s.", routeShort, directionText, altDirectionText) }
+			>
+				<span
+					class="route-badge-sm"
+					style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(routeColor), routeTextColorOrDefault(routeTextColor)) }
+				>{ routeShort }</span>
+				{ directionText }
+				<span class="toggle-icon" aria-hidden="true">&#x21C4;</span>
+			</button>
+		} else {
+			<span class="route-label-inline">
+				<span
+					class="route-badge-sm"
+					style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(routeColor), routeTextColorOrDefault(routeTextColor)) }
+				>{ routeShort }</span>
+				if directionText != "" {
+					{ directionText }
+				}
+			</span>
+		}
+		<span class="route-row-info">
+			arriving in { fmt.Sprintf("%d", minutesAway) } min.
+			if isRealtime {
+				<span class={ templ.KV("departure-late", isLate) }>{ realtime }</span>
+				<span class="sched-note">(sched. { scheduled })</span>
+			} else {
+				{ scheduled }
+			}
+			at { stopName }
+		</span>
+	</div>
+	<div class="route-row-line2">
+		if len(laterTimes) > 0 {
+			<span>Also </span>
+			for i, lt := range laterTimes {
+				if i > 0 {
+					<span class="time-sep"> · </span>
+				}
+				if lt.IsRealtime {
+					<span class="departure-time-sm">{ lt.Time }</span>
+				} else {
+					<span>{ lt.Time }</span>
+				}
+			}
+		}
+		if interval != "" {
+			if len(laterTimes) > 0 {
+				<span class="time-sep"> · </span>
+			}
+			<span class="route-interval">{ interval }</span>
+		}
+		<a
+			href={ templ.SafeURL(laterURL) }
+			class="later-link"
+			aria-label="Get all later arrival times"
+		>
+			Later times &#x2192;
+		</a>
+	</div>
+}
+
+// NearbyStopsViewList renders the stop-first view of nearby departures.
+templ NearbyStopsViewList(stops []StopViewData) {
 	for _, stop := range stops {
 		<article class="card" data-testid="stop-card">
 			<div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -87,11 +358,34 @@ templ NearbyStopList(stops []NearbyStop) {
 				</h3>
 				<span class="distance" data-testid="stop-distance">{ stop.Distance }</span>
 			</div>
-			if len(stop.Departures) > 0 {
-				<ul role="list" aria-label={ fmt.Sprintf("Departures from %s", stop.StopName) } style="list-style:none;padding:0;margin:0">
-					for _, dep := range stop.Departures {
-						<li style="margin-bottom:0.75rem">
-							@DepartureRow(dep)
+			if stop.StopDesc != "" {
+				<p class="stop-desc">{ stop.StopDesc }</p>
+			}
+			if len(stop.RouteGroups) > 0 {
+				<ul role="list" aria-label={ fmt.Sprintf("Routes at %s", stop.StopName) } style="list-style:none;padding:0;margin:0">
+					for _, rg := range stop.RouteGroups {
+						<li class="stop-route-group">
+							<div class="departure-row">
+								<a
+									href={ templ.SafeURL(fmt.Sprintf("/routes/%s", rg.RouteID)) }
+									class="route-badge"
+									style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(rg.RouteColor), routeTextColorOrDefault(rg.RouteTextColor)) }
+									aria-label={ fmt.Sprintf("Route %s", rg.RouteShort) }
+								>
+									{ rg.RouteShort }
+								</a>
+								<div class="departure-details">
+									if rg.DirectionText != "" {
+										<span class="direction-label">{ rg.DirectionText }</span>
+									}
+									<div>{ rg.Headsign }</div>
+									<div class="stop-route-times">
+										for _, t := range rg.Times {
+											@departureTime(t.IsRealtime, t.IsLate, t.Realtime, t.Scheduled, t.MinutesAway)
+										}
+									</div>
+								</div>
+							</div>
 						</li>
 					}
 				</ul>
@@ -104,7 +398,7 @@ templ NearbyStopList(stops []NearbyStop) {
 
 // DepartureRow renders a single departure entry.
 templ DepartureRow(dep DepartureInfo) {
-	<div style="display:flex;align-items:center;gap:0.75rem">
+	<div class="departure-row">
 		<a
 			href={ templ.SafeURL(fmt.Sprintf("/routes/%s", dep.RouteID)) }
 			class="route-badge"
@@ -113,23 +407,69 @@ templ DepartureRow(dep DepartureInfo) {
 		>
 			{ dep.RouteShort }
 		</a>
-		<div>
-			<div>{ dep.Headsign }</div>
-			<div>
-				if dep.IsRealtime {
-					<span class={ "departure-time", templ.KV("departure-late", dep.IsLate) }>{ dep.Realtime }</span>
-					<span class="departure-scheduled">
-						(sched. { dep.Scheduled })
-					</span>
-				} else {
-					<span class="departure-time">{ dep.Scheduled }</span>
+		<div class="departure-details">
+			if dep.HasAlt {
+				<div class="direction-group">
+					<div class="direction-primary">
+						if dep.DirectionText != "" {
+							<button
+								class="direction-toggle"
+								aria-label={ fmt.Sprintf("Showing %s departures. Activate to show %s instead.", dep.DirectionText, dep.AltDirectionText) }
+							>
+								{ dep.DirectionText }
+							</button>
+						}
+						<div>{ dep.Headsign }</div>
+						<div>
+							@departureTime(dep.IsRealtime, dep.IsLate, dep.Realtime, dep.Scheduled, dep.MinutesAway)
+						</div>
+					</div>
+					<div class="direction-alt" hidden>
+						if dep.AltDirectionText != "" {
+							<button
+								class="direction-toggle"
+								aria-label={ fmt.Sprintf("Showing %s departures. Activate to show %s instead.", dep.AltDirectionText, dep.DirectionText) }
+							>
+								{ dep.AltDirectionText }
+							</button>
+						}
+						<div>{ dep.AltHeadsign }</div>
+						<div>
+							@departureTime(dep.AltIsRealtime, dep.AltIsLate, dep.AltRealtime, dep.AltScheduled, dep.AltMinutesAway)
+						</div>
+						if dep.AltStopName != "" && dep.AltStopName != dep.PrimaryStopName {
+							<div class="alt-stop-note">
+								at { dep.AltStopName }
+							</div>
+						}
+					</div>
+				</div>
+			} else {
+				if dep.DirectionText != "" {
+					<span class="direction-label">{ dep.DirectionText }</span>
 				}
-				<span aria-label={ fmt.Sprintf("%d minutes away", dep.MinutesAway) }>
-					— { fmt.Sprintf("%d min", dep.MinutesAway) }
-				</span>
-			</div>
+				<div>{ dep.Headsign }</div>
+				<div>
+					@departureTime(dep.IsRealtime, dep.IsLate, dep.Realtime, dep.Scheduled, dep.MinutesAway)
+				</div>
+			}
 		</div>
 	</div>
+}
+
+// departureTime renders the time portion of a departure.
+templ departureTime(isRealtime bool, isLate bool, realtime string, scheduled string, minutesAway int) {
+	if isRealtime {
+		<span class={ "departure-time", templ.KV("departure-late", isLate) }>{ realtime }</span>
+		<span class="departure-scheduled">
+			(sched. { scheduled })
+		</span>
+	} else {
+		<span class="departure-time">{ scheduled }</span>
+	}
+	<span aria-label={ fmt.Sprintf("%d minutes away", minutesAway) }>
+		— { fmt.Sprintf("%d min", minutesAway) }
+	</span>
 }
 
 // AlertSection renders service alerts with full text.
@@ -147,6 +487,24 @@ templ AlertSection(alerts []AlertDisplay) {
 			</div>
 		}
 	</section>
+}
+
+func altStopID(altID, fallback string) string {
+	if altID != "" {
+		return altID
+	}
+	return fallback
+}
+
+func nearbyTabURL(view, lat, lon, query string) string {
+	u := "/nearby?view=" + view
+	if lat != "" && lon != "" {
+		u += "&lat=" + lat + "&lon=" + lon
+	}
+	if query != "" {
+		u += "&q=" + url.QueryEscape(query)
+	}
+	return u
 }
 
 func routeColorOrDefault(c string) string {

@@ -31,8 +31,14 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 
 	// 3. Build a map of realtime data keyed by trip_id for merging
 	rtByTrip := make(map[string]nextrip.Departure)
+	// Also build a map of direction text by route+direction_id for fallback
+	dirTextByRouteDir := make(map[string]string)
 	for _, d := range rtDeps {
 		rtByTrip[d.TripID] = d
+		if d.DirectionText != "" {
+			key := fmt.Sprintf("%s:%d", d.RouteID, d.DirectionID)
+			dirTextByRouteDir[key] = expandDirectionText(d.DirectionText)
+		}
 	}
 
 	// 4. Merge: start with scheduled, overlay realtime where available
@@ -54,13 +60,19 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 			RouteShort:  routeShort,
 			RouteColor:  sched.RouteColor,
 			Headsign:    sched.TripHeadsign,
+			DirectionID: sched.DirectionID,
 			Scheduled:   scheduledTime,
 			MinutesAway: minutesAway,
 		}
 
+		// Try to get direction text from NexTrip data for this route+direction
+		dirKey := fmt.Sprintf("%s:%d", sched.RouteID, sched.DirectionID)
+		dep.DirectionText = dirTextByRouteDir[dirKey]
+
 		// Overlay realtime data if available for this trip
 		if rt, ok := rtByTrip[sched.TripID]; ok {
 			dep.IsRealtime = rt.Actual
+			dep.DirectionText = expandDirectionText(rt.DirectionText)
 			// Use NexTrip short name if GTFS short name was empty
 			if sched.RouteShort == "" && rt.RouteShortName != "" {
 				dep.RouteShort = rt.RouteShortName
@@ -94,13 +106,15 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 		}
 
 		result = append(result, templates.DepartureInfo{
-			RouteID:    rt.RouteID,
-			RouteShort: rt.RouteShortName,
-			Headsign:   rt.Description,
-			Scheduled:  rtTime.Format("3:04 PM"),
-			Realtime:   rtTime.Format("3:04 PM"),
-			MinutesAway: minutesAway,
-			IsRealtime: rt.Actual,
+			RouteID:       rt.RouteID,
+			RouteShort:    rt.RouteShortName,
+			Headsign:      rt.Description,
+			DirectionText: expandDirectionText(rt.DirectionText),
+			DirectionID:   rt.DirectionID,
+			Scheduled:     rtTime.Format("3:04 PM"),
+			Realtime:      rtTime.Format("3:04 PM"),
+			MinutesAway:   minutesAway,
+			IsRealtime:    rt.Actual,
 		})
 	}
 
@@ -117,21 +131,20 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 	return result
 }
 
-// fetchDeparturesGrouped returns departures grouped by route,
-// with up to 3 next arrivals per route. Used for the nearby view.
-func (h *Handler) fetchDeparturesGrouped(ctx context.Context, stopID string, now time.Time) []templates.DepartureInfo {
+// fetchDeparturesForStopView returns departures grouped by route+direction
+// with individual time entries (for the stops-centric nearby view).
+func (h *Handler) fetchDeparturesForStopView(ctx context.Context, stopID string, now time.Time) []templates.StopRouteGroup {
 	allDeps := h.fetchDepartures(ctx, stopID, now, 30)
 
-	// Group by route+direction, take first 3 per group
 	type routeKey struct {
-		routeID   string
-		headsign  string
+		routeID     string
+		directionID int
 	}
 	groups := make(map[routeKey][]templates.DepartureInfo)
 	var order []routeKey
 
 	for _, dep := range allDeps {
-		key := routeKey{dep.RouteID, dep.Headsign}
+		key := routeKey{dep.RouteID, dep.DirectionID}
 		if _, exists := groups[key]; !exists {
 			order = append(order, key)
 		}
@@ -140,33 +153,46 @@ func (h *Handler) fetchDeparturesGrouped(ctx context.Context, stopID string, now
 		}
 	}
 
-	// Flatten: return the first departure per route (for sorting the stop),
-	// but include the next 2 as additional times in a formatted string
-	var result []templates.DepartureInfo
+	var result []templates.StopRouteGroup
 	for _, key := range order {
 		deps := groups[key]
 		if len(deps) == 0 {
 			continue
 		}
-		primary := deps[0]
-		// Format additional times into the headsign line
-		if len(deps) > 1 {
-			also := "Also: "
-			for i := 1; i < len(deps); i++ {
-				if i > 1 {
-					also += ", "
-				}
-				if deps[i].IsRealtime && deps[i].Realtime != "" {
-					also += deps[i].Realtime
-				} else {
-					also += deps[i].Scheduled
-				}
-				also += fmt.Sprintf(" (%d min)", deps[i].MinutesAway)
-			}
-			primary.Headsign = primary.Headsign + " — " + also
+		rg := templates.StopRouteGroup{
+			RouteID:        deps[0].RouteID,
+			RouteShort:     deps[0].RouteShort,
+			RouteColor:     deps[0].RouteColor,
+			RouteTextColor: deps[0].RouteTextColor,
+			DirectionText:  deps[0].DirectionText,
+			Headsign:       deps[0].Headsign,
 		}
-		result = append(result, primary)
+		for _, dep := range deps {
+			rg.Times = append(rg.Times, templates.StopRouteDeparture{
+				Scheduled:   dep.Scheduled,
+				Realtime:    dep.Realtime,
+				MinutesAway: dep.MinutesAway,
+				IsRealtime:  dep.IsRealtime,
+				IsLate:      dep.IsLate,
+			})
+		}
+		result = append(result, rg)
 	}
-
 	return result
+}
+
+// expandDirectionText converts NexTrip direction abbreviations to full words.
+func expandDirectionText(abbr string) string {
+	switch abbr {
+	case "NB":
+		return "Northbound"
+	case "SB":
+		return "Southbound"
+	case "EB":
+		return "Eastbound"
+	case "WB":
+		return "Westbound"
+	default:
+		return abbr
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"gobus/internal/config"
+	"gobus/internal/geocode"
 	"gobus/internal/nextrip"
 	"gobus/internal/realtime"
 	"gobus/internal/storage"
@@ -14,11 +15,12 @@ type Handler struct {
 	db     *storage.DB
 	nt     *nextrip.Client
 	rt     *realtime.Store
+	geo    *geocode.Client
 	cfg    *config.Config
 	logger *slog.Logger
 }
 
 // New creates a Handler.
-func New(db *storage.DB, nt *nextrip.Client, rt *realtime.Store, cfg *config.Config, logger *slog.Logger) *Handler {
-	return &Handler{db: db, nt: nt, rt: rt, cfg: cfg, logger: logger}
+func New(db *storage.DB, nt *nextrip.Client, rt *realtime.Store, geo *geocode.Client, cfg *config.Config, logger *slog.Logger) *Handler {
+	return &Handler{db: db, nt: nt, rt: rt, geo: geo, cfg: cfg, logger: logger}
 }

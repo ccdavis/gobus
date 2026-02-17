@@ -65,11 +65,13 @@
     }
 
     container.removeAttribute('hidden');
+    var currentView = new URLSearchParams(window.location.search).get('view') || 'routes';
     var html = '<div class="saved-locations-bar">';
     html += '<span class="saved-label">Saved:</span>';
     for (var i = 0; i < locs.length; i++) {
       var loc = locs[i];
-      var href = '/nearby?lat=' + encodeURIComponent(loc.lat) +
+      var href = '/nearby?view=' + encodeURIComponent(currentView) +
+                 '&lat=' + encodeURIComponent(loc.lat) +
                  '&lon=' + encodeURIComponent(loc.lon);
       html += '<a href="' + href + '" class="saved-btn" title="' +
               loc.name.replace(/"/g, '&quot;') + '">' +
@@ -147,6 +149,39 @@
 
   // Render saved locations on nearby page load
   renderSavedLocations();
+
+  // --- Direction Toggle ---
+  // Works for both route-nearby-row clicks and direction-toggle button clicks
+  document.addEventListener('click', function (e) {
+    // Don't toggle if clicking the later link
+    if (e.target.closest('.later-link')) return;
+
+    // Check for route row click or direction-toggle button click
+    var row = e.target.closest('.route-nearby-row');
+    var btn = e.target.closest('.direction-toggle');
+    var group = null;
+
+    if (row) {
+      group = row.querySelector('.direction-group');
+    } else if (btn) {
+      group = btn.closest('.direction-group');
+    }
+
+    if (!group) return;
+
+    var primary = group.querySelector('.direction-primary');
+    var alt = group.querySelector('.direction-alt');
+    if (!primary || !alt) return;
+
+    var showingPrimary = !primary.hasAttribute('hidden');
+    if (showingPrimary) {
+      primary.setAttribute('hidden', '');
+      alt.removeAttribute('hidden');
+    } else {
+      alt.setAttribute('hidden', '');
+      primary.removeAttribute('hidden');
+    }
+  });
 
   // --- Save Stop Button (on stop detail page) ---
   var saveStopBtn = document.getElementById('save-stop-btn');

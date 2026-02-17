@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type NearbyStopRow struct {
 	StopID             string
 	StopCode           string
 	StopName           string
+	StopDesc           string // e.g. "Nearside S", "Farside N"
 	StopLat            float64
 	StopLon            float64
 	LocationType       int
@@ -41,7 +43,8 @@ type NearbyStopRow struct {
 // The caller should refine distances with Haversine and re-sort.
 func (db *DB) NearbyStops(ctx context.Context, lat, lon, radiusDeg float64, limit int) ([]NearbyStopRow, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT s.stop_id, s.stop_code, s.stop_name, s.stop_lat, s.stop_lon,
+		SELECT s.stop_id, s.stop_code, s.stop_name, s.stop_desc,
+		       s.stop_lat, s.stop_lon,
 		       s.location_type, s.wheelchair_boarding
 		FROM stops_rtree AS r
 		JOIN stops AS s ON s.rowid = r.id
@@ -62,10 +65,13 @@ func (db *DB) NearbyStops(ctx context.Context, lat, lon, radiusDeg float64, limi
 	var stops []NearbyStopRow
 	for rows.Next() {
 		var s NearbyStopRow
-		if err := rows.Scan(&s.StopID, &s.StopCode, &s.StopName, &s.StopLat, &s.StopLon,
+		var stopDesc sql.NullString
+		if err := rows.Scan(&s.StopID, &s.StopCode, &s.StopName, &stopDesc,
+			&s.StopLat, &s.StopLon,
 			&s.LocationType, &s.WheelchairBoarding); err != nil {
 			return nil, fmt.Errorf("scan stop: %w", err)
 		}
+		s.StopDesc = stopDesc.String
 		stops = append(stops, s)
 	}
 	return stops, rows.Err()
@@ -83,6 +89,70 @@ type DepartureRow struct {
 	DirectionID   int
 	DepartureTime string // HH:MM:SS format (can exceed 24:00:00 for next-day trips)
 	StopSequence  int
+}
+
+// StopSearchResult is a distinct intersection found by a cross-street search.
+type StopSearchResult struct {
+	Name string
+	Lat  float64
+	Lon  float64
+}
+
+// SearchStops searches for stops matching a cross-street query.
+// It splits the query on common separators and finds stops whose name
+// contains both parts. Results are grouped by stop_name with averaged coordinates.
+func (db *DB) SearchStops(ctx context.Context, query string) ([]StopSearchResult, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	var parts []string
+	for _, sep := range []string{" and ", " & ", " at ", "/", " n ", " near "} {
+		if i := strings.Index(q, sep); i > 0 {
+			parts = []string{
+				strings.TrimSpace(q[:i]),
+				strings.TrimSpace(q[i+len(sep):]),
+			}
+			break
+		}
+	}
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		parts = []string{q}
+	}
+
+	var rows *sql.Rows
+	var err error
+	if len(parts) == 2 {
+		rows, err = db.QueryContext(ctx, `
+			SELECT stop_name, AVG(stop_lat), AVG(stop_lon)
+			FROM stops
+			WHERE LOWER(stop_name) LIKE '%' || ? || '%'
+			  AND LOWER(stop_name) LIKE '%' || ? || '%'
+			  AND location_type = 0
+			GROUP BY stop_name
+			ORDER BY stop_name
+			LIMIT 20`, parts[0], parts[1])
+	} else {
+		rows, err = db.QueryContext(ctx, `
+			SELECT stop_name, AVG(stop_lat), AVG(stop_lon)
+			FROM stops
+			WHERE LOWER(stop_name) LIKE '%' || ? || '%'
+			  AND location_type = 0
+			GROUP BY stop_name
+			ORDER BY stop_name
+			LIMIT 20`, parts[0])
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search stops: %w", err)
+	}
+	defer rows.Close()
+
+	var results []StopSearchResult
+	for rows.Next() {
+		var r StopSearchResult
+		if err := rows.Scan(&r.Name, &r.Lat, &r.Lon); err != nil {
+			return nil, fmt.Errorf("scan stop: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
 
 // DeparturesForStop returns upcoming scheduled departures for a stop on a given date.

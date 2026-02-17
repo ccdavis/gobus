@@ -1,0 +1,71 @@
+package templates
+
+import "fmt"
+
+// LaterArrivalsData holds the data for the later arrivals page.
+type LaterArrivalsData struct {
+	Page           Page
+	StopID         string
+	StopName       string
+	RouteID        string
+	RouteShort     string
+	RouteColor     string
+	RouteTextColor string
+	DirectionText  string
+	DirectionID    int
+	Departures     []DepartureInfo
+	Interval       string
+}
+
+// LaterArrivalsPage renders the later arrivals page for a route at a stop.
+templ LaterArrivalsPage(data LaterArrivalsData) {
+	@Layout(data.Page) {
+		<section aria-label={ fmt.Sprintf("Route %s arrivals at %s", data.RouteShort, data.StopName) }>
+			<div class="later-header">
+				<span
+					class="route-badge"
+					style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(data.RouteColor), routeTextColorOrDefault(data.RouteTextColor)) }
+				>
+					{ data.RouteShort }
+				</span>
+				<div>
+					<h2>{ data.StopName }</h2>
+					if data.DirectionText != "" {
+						<span class="direction-label">{ data.DirectionText }</span>
+					}
+				</div>
+			</div>
+			<div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">
+				<a href="/nearby" class="later-back" onclick="if(history.length>1){history.back();return false}">&#x2190; Back</a>
+				<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", data.StopID)) } class="later-back">All routes at this stop</a>
+				<a href={ templ.SafeURL(fmt.Sprintf("/routes/%s", data.RouteID)) } class="later-back">Explore route { data.RouteShort }</a>
+			</div>
+			if data.Interval != "" {
+				<p class="interval">{ data.Interval }</p>
+			}
+			if len(data.Departures) > 0 {
+				<p class="later-count">{ fmt.Sprintf("%d arrivals in the next 18 hours", len(data.Departures)) }</p>
+				<ul role="list" class="later-list" aria-label="Upcoming arrivals">
+					for _, dep := range data.Departures {
+						<li class="later-item">
+							<div class="later-time">
+								if dep.IsRealtime {
+									<span class={ "departure-time", templ.KV("departure-late", dep.IsLate) }>{ dep.Realtime }</span>
+									<span class="departure-scheduled">(sched. { dep.Scheduled })</span>
+								} else {
+									<span class="departure-time">{ dep.Scheduled }</span>
+								}
+							</div>
+							<div class="later-meta">
+								<span>{ fmt.Sprintf("%d min", dep.MinutesAway) }</span>
+								<span class="later-headsign">{ dep.Headsign }</span>
+							</div>
+						</li>
+					}
+				</ul>
+			} else {
+				<p>No upcoming arrivals for this route at this stop.</p>
+			}
+		</section>
+	}
+}

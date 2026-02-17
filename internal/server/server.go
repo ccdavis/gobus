@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"gobus/internal/config"
+	"gobus/internal/geocode"
 	"gobus/internal/handler"
 	"gobus/internal/nextrip"
 	"gobus/internal/realtime"
@@ -24,7 +25,8 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 	mux := http.NewServeMux()
 	s := &Server{mux: mux, cfg: cfg, logger: logger}
 
-	h := handler.New(db, nt, rt, cfg, logger)
+	geo := geocode.New("GoBus/1.0 (transit PWA)")
+	h := handler.New(db, nt, rt, geo, cfg, logger)
 
 	// Static files
 	fs := http.FileServer(http.Dir("web/static"))
@@ -36,6 +38,7 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 	mux.HandleFunc("GET /routes", h.RouteList)
 	mux.HandleFunc("GET /routes/{id}", h.RouteDetail)
 	mux.HandleFunc("GET /stops/{id}", h.StopDetail)
+	mux.HandleFunc("GET /stops/{stopID}/route/{routeID}", h.LaterArrivals)
 
 	// SSE
 	mux.HandleFunc("GET /sse/departures/{id}", h.SSEDepartures)
