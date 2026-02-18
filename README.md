@@ -2,7 +2,13 @@
 
 Accessible real-time transit app for Metro Transit (Minneapolis/St. Paul). Built as a PWA with a Go backend, designed for screen reader users and anyone who wants a fast, clean departure board.
 
-## What it does
+This is a PWA (Progressive web application,) basically a web page that your phone can put on its app menu and treat it like it is a real app. For iPhone you need to open initially with Safari and add to home screen; Android will give you the option even more easily.
+
+As a user you must register with a user name and pass-phrase, but no email or phone number is required. Registration is simply a way to keep your preferences separate from other users and to limit bots singing up. Once you register and sign in, your browser remembers your login unless you don't open the app for more than thirty days.
+
+I "built" this app completely with Claude Code / Opus 4.6. It was a means to an end: I wanted a more friendly bus and train schedule app. I could do it by hand in Rust or C++ or Python but I think it would have taken several weeks at least. This took me three evenings.
+
+## Features
 
 - **Nearby departures** — uses your location to show the closest stops with scheduled and real-time arrival times
 - **Route explorer** — browse all 123 Metro Transit routes, see every stop in each direction
@@ -11,7 +17,9 @@ Accessible real-time transit app for Metro Transit (Minneapolis/St. Paul). Built
 - **Saved locations** — save frequently used stops as "Home", "Work", etc. for one-tap access
 - **PWA** — installable on mobile, works offline with cached pages, dark mode default
 
-## Requirements
+Directions  from this poihnt on are for developers and for hosting the app, not running it as a end user.
+
+## Build Requirements
 
 - **Go 1.22+** with CGo enabled (for SQLite)
 - **GCC** or another C compiler (required by `mattn/go-sqlite3`)
