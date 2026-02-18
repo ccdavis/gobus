@@ -13,9 +13,84 @@ import (
 	"gobus/internal/storage"
 )
 
-func withMiddleware(h http.Handler, logger *slog.Logger, cookieSecret []byte, db *storage.DB) http.Handler {
-	return securityHeaders(requestLogger(requireAuth(h, cookieSecret, db), logger))
+func withMiddleware(h http.Handler, logger *slog.Logger, cookieSecret []byte, db *storage.DB, ready <-chan struct{}) http.Handler {
+	return securityHeaders(requestLogger(waitForData(requireAuth(h, cookieSecret, db), ready), logger))
 }
+
+// waitForData shows a loading page while GTFS data is being downloaded.
+// Static assets and PWA files pass through so the loading page looks right.
+func waitForData(next http.Handler, ready <-chan struct{}) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-ready:
+			// Data is ready — pass through
+			next.ServeHTTP(w, r)
+			return
+		default:
+		}
+
+		// Allow static assets, PWA files, and auth pages through while loading
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/static/") || p == "/sw.js" ||
+			p == "/manifest.json" || p == "/offline" ||
+			p == "/login" || p == "/register" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Show loading page
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(loadingPage))
+	})
+}
+
+const loadingPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading — GoBus</title>
+<meta http-equiv="refresh" content="5">
+<meta name="theme-color" content="#1a1a2e">
+<style>
+  body {
+    background: #1a1a2e;
+    color: #e8e8e8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+  }
+  .loading {
+    text-align: center;
+    padding: 2rem;
+  }
+  h1 { color: #fff; margin-bottom: 1rem; }
+  p { color: #b0b0b0; font-size: 1.125rem; }
+  .spinner {
+    width: 40px; height: 40px;
+    margin: 1.5rem auto;
+    border: 4px solid #2a2a4a;
+    border-top-color: #4cc9f0;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="loading" role="status" aria-live="polite">
+  <h1>GoBus</h1>
+  <div class="spinner" aria-hidden="true"></div>
+  <p>Please wait, downloading route data...</p>
+  <p>This page will refresh automatically.</p>
+</div>
+</body>
+</html>`
 
 // requireAuth redirects unauthenticated requests to /login.
 // Public paths are whitelisted and pass through without auth.

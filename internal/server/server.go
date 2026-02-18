@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -11,6 +13,7 @@ import (
 	"gobus/internal/nextrip"
 	"gobus/internal/realtime"
 	"gobus/internal/storage"
+	"gobus/web"
 )
 
 // Server is the HTTP server for GoBus.
@@ -20,6 +23,7 @@ type Server struct {
 	logger       *slog.Logger
 	db           *storage.DB
 	cookieSecret []byte
+	ready        chan struct{} // closed when GTFS data is available
 }
 
 // New creates a new Server with all routes registered.
@@ -28,11 +32,18 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 	geo := geocode.New("GoBus/1.0 (transit PWA)")
 	h := handler.New(db, nt, rt, geo, cfg, logger)
 
-	s := &Server{mux: mux, cfg: cfg, logger: logger, db: db, cookieSecret: h.CookieSecret()}
+	ready := make(chan struct{})
+	// If data already exists, mark ready immediately
+	if db.HasData(context.Background()) {
+		close(ready)
+	}
 
-	// Static files — versioned URLs (?v=hash) get immutable caching
-	fs := http.FileServer(http.Dir("web/static"))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", staticCacheHandler(fs)))
+	s := &Server{mux: mux, cfg: cfg, logger: logger, db: db, cookieSecret: h.CookieSecret(), ready: ready}
+
+	// Static files — served from embedded FS, versioned URLs get immutable caching
+	staticFS, _ := fs.Sub(web.StaticFiles, "static")
+	fileServer := http.FileServer(http.FS(staticFS))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", staticCacheHandler(fileServer)))
 
 	// Auth
 	mux.HandleFunc("GET /login", h.Login)
@@ -61,9 +72,19 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 	return s
 }
 
+// SetReady signals that GTFS data is available and the app can serve requests.
+func (s *Server) SetReady() {
+	select {
+	case <-s.ready:
+		// already closed
+	default:
+		close(s.ready)
+	}
+}
+
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.logger.Info("server starting", "addr", addr)
-	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger, s.cookieSecret, s.db))
+	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger, s.cookieSecret, s.db, s.ready))
 }

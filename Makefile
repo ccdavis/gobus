@@ -1,4 +1,4 @@
-.PHONY: build dev generate test test-e2e test-all clean import-gtfs
+.PHONY: build dev generate test test-e2e test-all clean import-gtfs deploy
 
 # CGo is required for mattn/go-sqlite3
 export CGO_ENABLED := 1
@@ -29,6 +29,10 @@ test-all: test test-e2e
 # Force GTFS download and import
 import-gtfs: build
 	./gobus --import-gtfs
+
+# Deploy to Fly.io
+deploy:
+	fly deploy
 
 # Clean build artifacts
 clean:

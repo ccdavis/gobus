@@ -1,0 +1,7 @@
+gobus
+gobus.db
+data/
+e2e/node_modules/
+*.gif
+*.png.bak
+.git

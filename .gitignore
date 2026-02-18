@@ -24,9 +24,10 @@ vendor/
 # Generated protobuf files
 *.pb.go
 
-# Environment
+# Environment / secrets
 .env
 .env.local
+.cookie_secret
 
 # IDE
 .idea/

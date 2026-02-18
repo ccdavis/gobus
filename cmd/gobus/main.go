@@ -58,23 +58,6 @@ func main() {
 		return
 	}
 
-	// Ensure GTFS data exists (download on first run)
-	if err := scheduler.EnsureData(ctx); err != nil {
-		logger.Error("failed to ensure GTFS data", "error", err)
-		// Continue anyway — the app can still serve route explorer from cached data
-		// or show a helpful error message
-	}
-
-	// Start background GTFS update scheduler
-	go scheduler.StartBackground(ctx)
-
-	// Check for updates on first access today
-	go func() {
-		if err := scheduler.CheckAndUpdate(ctx); err != nil {
-			logger.Error("daily GTFS check failed", "error", err)
-		}
-	}()
-
 	// Create NexTrip API client
 	nt := nextrip.NewClient(cfg.NexTripBaseURL, logger)
 
@@ -86,8 +69,24 @@ func main() {
 	)
 	go alertsFetcher.Start(ctx)
 
-	// Start HTTP server
+	// Start HTTP server (serves loading page until GTFS data is ready)
 	srv := server.New(cfg, db, nt, rtStore, logger)
+
+	// Download GTFS data in the background — server shows loading page until done
+	go func() {
+		if err := scheduler.EnsureData(ctx); err != nil {
+			logger.Error("failed to ensure GTFS data", "error", err)
+		}
+		srv.SetReady()
+
+		// Start background GTFS update scheduler
+		go scheduler.StartBackground(ctx)
+
+		// Check for updates on first access today
+		if err := scheduler.CheckAndUpdate(ctx); err != nil {
+			logger.Error("daily GTFS check failed", "error", err)
+		}
+	}()
 
 	// Graceful shutdown on SIGINT/SIGTERM
 	go func() {
