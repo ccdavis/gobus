@@ -1,6 +1,123 @@
-# Deploying GoBus to Fly.io
+# GoBus Deployment Guide
+
+## Building from source
+
+GoBus requires specific build tools because it uses CGo (for SQLite) and
+templ (for type-safe HTML templates). Use the setup script below or follow
+the manual steps.
+
+### Quick setup (Linux and macOS)
+
+Run from the project root:
+
+```bash
+./scripts/setup-build.sh
+```
+
+This installs Go 1.24, templ, and a C compiler (if missing), then builds
+the binary. See below for what it does.
+
+### Manual setup — Linux (Ubuntu/Debian)
+
+```bash
+# 1. Install C compiler (required for CGo / SQLite)
+sudo apt-get update && sudo apt-get install -y gcc build-essential
+
+# 2. Install Go 1.24
+#    Remove any old system Go first
+sudo rm -rf /usr/local/go
+curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | sudo tar -C /usr/local -xzf -
+
+# 3. Add Go to PATH (add to ~/.bashrc or ~/.profile for persistence)
+export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH
+
+# 4. Verify
+go version    # should show go1.24.0
+gcc --version # should show gcc
+
+# 5. Install templ CLI
+go install github.com/a-h/templ/cmd/templ@v0.3.977
+
+# 6. Build GoBus
+cd /path/to/gobus
+templ generate
+CGO_ENABLED=1 go build -o gobus ./cmd/gobus/
+
+# 7. Verify — should print usage and exit
+./gobus --help
+```
+
+For **ARM servers** (e.g., Raspberry Pi), replace the Go download URL:
+
+```bash
+curl -fsSL https://go.dev/dl/go1.24.0.linux-arm64.tar.gz | sudo tar -C /usr/local -xzf -
+```
+
+### Manual setup — macOS
+
+```bash
+# 1. Install Xcode command line tools (provides C compiler)
+xcode-select --install    # skip if already installed
+
+# 2. Install Go via Homebrew
+brew install go@1.24
+# Or download directly:
+# curl -fsSL https://go.dev/dl/go1.24.0.darwin-arm64.tar.gz | sudo tar -C /usr/local -xzf -
+
+# 3. Add Go to PATH (add to ~/.zshrc for persistence)
+export PATH=$(brew --prefix go@1.24)/bin:$HOME/go/bin:$PATH
+
+# 4. Install templ CLI
+go install github.com/a-h/templ/cmd/templ@v0.3.977
+
+# 5. Build
+cd /path/to/gobus
+templ generate
+CGO_ENABLED=1 go build -o gobus ./cmd/gobus/
+```
+
+### Running the binary
+
+The binary is self-contained — static assets are embedded. Just copy it
+to the server and run:
+
+```bash
+# Copy to server
+scp gobus you@server:~/gobus
+
+# On the server
+./gobus                          # starts on :8080, auto-downloads GTFS
+./gobus -port 3000               # custom port
+GOBUS_DB_PATH=/data/gobus.db ./gobus   # custom database location
+```
+
+On first run it downloads ~24 MB of GTFS data and imports it (~30 seconds).
+The cookie secret is auto-generated and saved to `.cookie_secret` next to
+the database.
+
+### Cross-compiling
+
+To build on macOS for a Linux server:
+
+```bash
+# For x86_64 Linux servers
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-linux-gnu-gcc go build -o gobus-linux ./cmd/gobus/
+
+# For ARM Linux servers (Raspberry Pi)
+GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -o gobus-linux-arm64 ./cmd/gobus/
+```
+
+Cross-compiling with CGo requires a cross-compiler (`brew install FiloSottile/musl-cross/musl-cross`).
+The easiest alternative: build directly on the target machine, or use Docker
+(the Dockerfile handles all build dependencies).
+
+---
+
+# Deploying to Fly.io
 
 Step-by-step guide to deploy GoBus as a public site with a custom domain.
+Fly.io builds the Docker image remotely, so you don't need build tools
+locally — just `flyctl`.
 
 ## Prerequisites
 
@@ -159,10 +276,11 @@ SSL certificate. Your site is live at `https://bus.yourdomain.com`.
 
 ## 7. First-time data setup
 
-On the first request after deploy, GoBus automatically downloads the Metro
-Transit GTFS feed (~24 MB) and imports it into SQLite. This takes about 30
-seconds. The app will be slow during this initial import but works normally
-afterward.
+On first startup, GoBus automatically downloads the Metro Transit GTFS feed
+(~24 MB) and imports it into SQLite. This takes about 30 seconds. During
+this time, visitors see a "Please wait, downloading route data..." loading
+page that auto-refreshes every 5 seconds. Once the import finishes, the
+next refresh lands on the login page.
 
 The GTFS data is stored on the persistent volume, so it survives deploys.
 GoBus automatically checks for GTFS updates daily.
