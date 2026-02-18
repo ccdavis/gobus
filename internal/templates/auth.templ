@@ -1,0 +1,116 @@
+package templates
+
+// AuthData holds data for the login and register pages.
+type AuthData struct {
+	Page     Page
+	IsLogin  bool
+	Error    string
+	Username string
+	TimeGate string // signed timestamp for anti-bot time gate (register only)
+}
+
+// AuthPage renders the login or register page.
+templ AuthPage(data AuthData) {
+	@AuthLayout(data.Page) {
+		<div class="auth-card">
+			if data.IsLogin {
+				<h2>Log in</h2>
+			} else {
+				<h2>Create an account</h2>
+			}
+			if data.Error != "" {
+				<div class="auth-error" role="alert">
+					{ data.Error }
+				</div>
+			}
+			if data.IsLogin {
+				<form method="POST" action="/login" class="auth-form">
+					<label for="username">Username</label>
+					<input
+						type="text"
+						id="username"
+						name="username"
+						value={ data.Username }
+						required
+						autocomplete="username"
+						autofocus
+					/>
+					<label for="passphrase">Passphrase</label>
+					<input
+						type="password"
+						id="passphrase"
+						name="passphrase"
+						required
+						autocomplete="current-password"
+					/>
+					<button type="submit">Log in</button>
+				</form>
+				<p class="auth-switch">
+					Don't have an account? <a href="/register">Register</a>
+				</p>
+			} else {
+				<form method="POST" action="/register" class="auth-form">
+					<!-- Honeypot: hidden from humans, filled by bots -->
+					<div class="hp-field" aria-hidden="true">
+						<label for="website">Website</label>
+						<input type="text" id="website" name="website" tabindex="-1" autocomplete="off"/>
+					</div>
+					<!-- Time gate token -->
+					<input type="hidden" name="ts" value={ data.TimeGate }/>
+					<label for="username">Username</label>
+					<input
+						type="text"
+						id="username"
+						name="username"
+						value={ data.Username }
+						required
+						minlength="3"
+						maxlength="30"
+						autocomplete="username"
+						autofocus
+					/>
+					<label for="passphrase">Passphrase</label>
+					<input
+						type="password"
+						id="passphrase"
+						name="passphrase"
+						required
+						minlength="8"
+						autocomplete="new-password"
+					/>
+					<p class="auth-hint">Choose a memorable phrase, at least 8 characters.</p>
+					<button type="submit">Register</button>
+				</form>
+				<p class="auth-switch">
+					Already have an account? <a href="/login">Log in</a>
+				</p>
+			}
+		</div>
+	}
+}
+
+// AuthLayout is a minimal page shell for auth pages (no nav, no install banner).
+templ AuthLayout(page Page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ page.Title } — GoBus</title>
+			<link rel="stylesheet" href={ "/static/css/main.css?v=" + page.AssetVersion }/>
+			<meta name="theme-color" content="#1a1a2e"/>
+		</head>
+		<body>
+			<a href="#main" class="skip-link">Skip to main content</a>
+			<header role="banner">
+				<h1>GoBus</h1>
+			</header>
+			<main id="main" role="main">
+				{ children... }
+			</main>
+			<footer role="contentinfo">
+				<p>GoBus — Metro Transit departure info</p>
+			</footer>
+		</body>
+	</html>
+}

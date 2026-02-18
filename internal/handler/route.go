@@ -32,10 +32,7 @@ func (h *Handler) RouteList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := templates.RouteListData{
-		Page: templates.Page{
-			Title:       "Route Explorer",
-			CurrentPath: "/routes",
-		},
+		Page: h.page("Route Explorer", "/routes"),
 		Routes: routes,
 	}
 
@@ -111,10 +108,7 @@ func (h *Handler) RouteDetail(w http.ResponseWriter, r *http.Request) {
 	routeAlerts := h.alertsForRoute(routeID)
 
 	data := templates.RouteDetailData{
-		Page: templates.Page{
-			Title:       fmt.Sprintf("Route %s", routeInfo.RouteShort),
-			CurrentPath: "/routes",
-		},
+		Page: h.page(fmt.Sprintf("Route %s", routeInfo.RouteShort), "/routes"),
 		RouteID:        routeInfo.RouteID,
 		RouteShort:     routeInfo.RouteShort,
 		RouteLong:      routeInfo.RouteLong,

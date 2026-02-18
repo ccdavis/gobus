@@ -14,6 +14,12 @@ type Config struct {
 	NexTripBaseURL string
 	TestMode       bool
 	ImportGTFS     bool // CLI flag: force GTFS re-import
+
+	CookieSecret    string // HMAC key for signing session cookies
+	MaxUsers        int    // Maximum number of registered users (0 = unlimited)
+	MaxDevicesTotal int    // Absolute cap on devices per user (oldest evicted)
+	MaxDevicesRecent int   // Max devices per user in rolling window
+	DeviceWindowMin int    // Rolling window size in minutes
 }
 
 // Load reads configuration from environment variables with defaults.
@@ -25,6 +31,11 @@ func Load() *Config {
 		GTFSURL:        envStr("GOBUS_GTFS_URL", "https://svc.metrotransit.org/mtgtfs/gtfs.zip"),
 		NexTripBaseURL: envStr("GOBUS_NEXTRIP_URL", "https://svc.metrotransit.org/nextrip"),
 		TestMode:       envBool("GOBUS_TEST_MODE", false),
+		CookieSecret:    envStr("GOBUS_COOKIE_SECRET", ""),
+		MaxUsers:        envInt("GOBUS_MAX_USERS", 100),
+		MaxDevicesTotal: envInt("GOBUS_MAX_DEVICES_TOTAL", 5),
+		MaxDevicesRecent: envInt("GOBUS_MAX_DEVICES_RECENT", 3),
+		DeviceWindowMin: envInt("GOBUS_DEVICE_WINDOW_MIN", 10),
 	}
 }
 

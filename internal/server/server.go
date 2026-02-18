@@ -15,26 +15,36 @@ import (
 
 // Server is the HTTP server for GoBus.
 type Server struct {
-	mux    *http.ServeMux
-	cfg    *config.Config
-	logger *slog.Logger
+	mux          *http.ServeMux
+	cfg          *config.Config
+	logger       *slog.Logger
+	db           *storage.DB
+	cookieSecret []byte
 }
 
 // New creates a new Server with all routes registered.
 func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.Store, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
-	s := &Server{mux: mux, cfg: cfg, logger: logger}
-
 	geo := geocode.New("GoBus/1.0 (transit PWA)")
 	h := handler.New(db, nt, rt, geo, cfg, logger)
 
-	// Static files
+	s := &Server{mux: mux, cfg: cfg, logger: logger, db: db, cookieSecret: h.CookieSecret()}
+
+	// Static files — versioned URLs (?v=hash) get immutable caching
 	fs := http.FileServer(http.Dir("web/static"))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", fs))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", staticCacheHandler(fs)))
+
+	// Auth
+	mux.HandleFunc("GET /login", h.Login)
+	mux.HandleFunc("POST /login", h.Login)
+	mux.HandleFunc("GET /register", h.Register)
+	mux.HandleFunc("POST /register", h.Register)
+	mux.HandleFunc("POST /logout", h.Logout)
 
 	// Pages
 	mux.HandleFunc("GET /", h.Home)
 	mux.HandleFunc("GET /nearby", h.Nearby)
+	mux.HandleFunc("GET /search", h.Search)
 	mux.HandleFunc("GET /routes", h.RouteList)
 	mux.HandleFunc("GET /routes/{id}", h.RouteDetail)
 	mux.HandleFunc("GET /stops/{id}", h.StopDetail)
@@ -55,5 +65,5 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 func (s *Server) ListenAndServe() error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.logger.Info("server starting", "addr", addr)
-	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger))
+	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger, s.cookieSecret, s.db))
 }

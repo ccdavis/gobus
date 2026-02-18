@@ -1,0 +1,78 @@
+package templates
+
+import (
+	"fmt"
+	"net/url"
+)
+
+// SearchResult is a disambiguation option from location search.
+type SearchResult struct {
+	Name string
+	Lat  string
+	Lon  string
+}
+
+// SearchData holds the data for the location search page.
+type SearchData struct {
+	Page          Page
+	Query         string         // What the user typed
+	View          string         // "routes" or "stops" — preserved through search
+	SearchError   string         // Error message from search
+	SearchResults []SearchResult // Disambiguation options
+}
+
+// SearchPage renders the location search page.
+templ SearchPage(data SearchData) {
+	@Layout(data.Page) {
+		<section aria-label="Search location">
+			<h2>Find a Location</h2>
+			<p class="search-hint">
+				Enter cross streets (e.g. <strong>Lake &amp; Lyndale</strong>) or a
+				street address (e.g. <strong>3501 Chicago Ave S</strong>).
+			</p>
+			<form action="/search" method="get" class="search-form">
+				<input type="hidden" name="view" value={ data.View }/>
+				<label for="q">Address or cross streets</label>
+				<div class="search-input-row">
+					<input
+						type="text"
+						id="q"
+						name="q"
+						placeholder="e.g. Lake &amp; Lyndale"
+						value={ data.Query }
+						autocomplete="street-address"
+						required
+					/>
+					<button type="submit">Search</button>
+				</div>
+			</form>
+			if data.SearchError != "" {
+				<div class="search-error-box" role="alert">
+					<p>{ data.SearchError }</p>
+				</div>
+			}
+			if len(data.SearchResults) > 0 {
+				<div class="search-disambig" role="region" aria-label="Did you mean">
+					<p><strong>Multiple locations match.</strong> Which did you mean?</p>
+					<ul role="list">
+						for _, sr := range data.SearchResults {
+							<li>
+								<a href={ templ.SafeURL(fmt.Sprintf("/nearby?view=%s&lat=%s&lon=%s&q=%s", data.View, sr.Lat, sr.Lon, url.QueryEscape(data.Query))) }>
+									{ sr.Name }
+								</a>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			<div class="search-tips">
+				<h3>Tips</h3>
+				<ul>
+					<li><strong>Cross streets</strong> work offline — they match against transit stop names in the local database.</li>
+					<li><strong>Street addresses</strong> require an internet connection and may not resolve all locations.</li>
+					<li>Try entering streets in either order: <em>Lake &amp; Lyndale</em> or <em>Lyndale &amp; Lake</em>.</li>
+				</ul>
+			</div>
+		</section>
+	}
+}

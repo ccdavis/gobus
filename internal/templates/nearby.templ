@@ -14,26 +14,17 @@ type AlertDisplay struct {
 
 // NearbyData holds the data for the nearby departures page.
 type NearbyData struct {
-	Page      Page
-	View      string // "routes" or "stops"
-	Routes    []RouteNearbyRow
+	Page     Page
+	View     string // "routes" or "stops"
+	Routes   []RouteNearbyRow
 	StopViews []StopViewData
-	HasStops  bool
-	HasMore   bool
-	MoreURL   string
-	Query       string // Manual address/cross-street query
-	Lat         string
-	Lon         string
-	SearchError   string         // Error message from cross-street search
-	SearchResults []SearchResult // Disambiguation options when search is ambiguous
-	Alerts        []AlertDisplay
-}
-
-// SearchResult is a disambiguation option from cross-street search.
-type SearchResult struct {
-	Name string
-	Lat  string
-	Lon  string
+	HasStops bool
+	HasMore  bool
+	MoreURL  string
+	Query    string // search query (for display / tab URLs)
+	Lat      string
+	Lon      string
+	Alerts   []AlertDisplay
 }
 
 // RouteNearbyRow holds data for a single route in the routes-first nearby view.
@@ -140,38 +131,17 @@ type DepartureInfo struct {
 templ NearbyPage(data NearbyData) {
 	@Layout(data.Page) {
 		<section aria-label="Nearby departures">
-			<h2>Nearby Departures</h2>
+			<div class="nearby-header">
+				<h2>Nearby Departures</h2>
+				<a href={ templ.SafeURL(fmt.Sprintf("/search?view=%s", data.View)) } class="change-location-link">Change location</a>
+			</div>
 			<div id="saved-locations" aria-label="Saved locations" hidden></div>
 			<div id="location-status" aria-live="polite"></div>
-			<form id="nearby-form" action="/nearby" method="get">
+			<form id="nearby-form" action="/nearby" method="get" hidden>
 				<input type="hidden" id="lat" name="lat" value={ data.Lat }/>
 				<input type="hidden" id="lon" name="lon" value={ data.Lon }/>
 				<input type="hidden" id="view" name="view" value={ data.View }/>
-				<div id="manual-entry" if data.Lat == "" && data.Lon == "" && data.Query == "" { hidden } >
-					<label for="address">Enter address or cross streets:</label>
-					<div style="display:flex;gap:0.5rem;margin-top:0.25rem">
-						<input type="text" id="address" name="q" placeholder="e.g. Lake &amp; Lyndale" value={ data.Query }/>
-						<button type="submit">Find Stops</button>
-					</div>
-				</div>
 			</form>
-			if data.SearchError != "" {
-				<p class="search-error" role="alert">{ data.SearchError }</p>
-			}
-			if len(data.SearchResults) > 0 {
-				<div class="search-disambig" role="region" aria-label="Did you mean">
-					<p>Multiple locations match. Which did you mean?</p>
-					<ul role="list">
-						for _, sr := range data.SearchResults {
-							<li>
-								<a href={ templ.SafeURL(fmt.Sprintf("/nearby?view=%s&lat=%s&lon=%s&q=%s", data.View, sr.Lat, sr.Lon, url.QueryEscape(data.Query))) }>
-									{ sr.Name }
-								</a>
-							</li>
-						}
-					</ul>
-				</div>
-			}
 			if data.Lat != "" {
 				<nav aria-label="View options" class="nearby-tabs">
 					<a
@@ -220,10 +190,10 @@ templ NearbyPage(data NearbyData) {
 							}
 						</div>
 					}
-				} else if data.Lat != "" || data.Query != "" {
-					<p>No stops found nearby. Try a different location.</p>
+				} else if data.Lat != "" {
+					<p>No stops found nearby. <a href={ templ.SafeURL(fmt.Sprintf("/search?view=%s", data.View)) }>Try a different location</a>.</p>
 				} else {
-					<p class="loading">Getting your location…</p>
+					<p class="loading" id="geo-loading">Getting your location…</p>
 				}
 			</div>
 		</section>
@@ -509,7 +479,7 @@ func nearbyTabURL(view, lat, lon, query string) string {
 
 func routeColorOrDefault(c string) string {
 	if c == "" {
-		return "0f3460"
+		return "1a5276"
 	}
 	return c
 }

@@ -92,6 +92,10 @@
 
 /* === Base === */
 
+[hidden] {
+  display: none !important;
+}
+
 *,
 *::before,
 *::after {
@@ -151,6 +155,29 @@ header h1 {
   margin: 0;
   font-size: var(--text-xl);
   color: var(--text-emphasis);
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logout-form {
+  margin: 0;
+}
+
+.logout-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.logout-btn:hover {
+  color: var(--text-primary);
 }
 
 nav[aria-label="Main navigation"] {
@@ -301,6 +328,85 @@ h3 {
   font-style: italic;
 }
 
+/* === Nearby header (title + change location) === */
+
+.nearby-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-sm);
+}
+
+.nearby-header h2 {
+  margin: 0;
+}
+
+.change-location-link {
+  font-size: 0.9rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.change-location-link:hover {
+  text-decoration: underline;
+}
+
+/* === Search page === */
+
+.search-hint {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin: 0 0 var(--space-md) 0;
+}
+
+.search-form {
+  margin-bottom: var(--space-lg);
+}
+
+.search-input-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.search-input-row input {
+  flex: 1;
+}
+
+.search-error-box {
+  background: var(--bg-card);
+  border: 2px solid var(--error);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.search-error-box p {
+  margin: 0;
+  color: var(--error);
+}
+
+.search-tips {
+  margin-top: var(--space-xl);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.search-tips h3 {
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.search-tips ul {
+  padding-left: var(--space-lg);
+}
+
+.search-tips li {
+  margin-bottom: var(--space-sm);
+}
+
 /* === Nearby view tabs === */
 
 .nearby-tabs {
@@ -397,18 +503,18 @@ h3 {
 /* === Routes nearby view === */
 
 #route-list {
-  margin-top: var(--space-md);
+  margin-top: var(--space-sm);
 }
 
 .route-nearby-row {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-sm) var(--space-md);
-  margin-bottom: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border);
   font-size: 0.9rem;
   line-height: 1.4;
-  transition: border-color 0.15s;
+}
+
+.route-nearby-row:last-child {
+  border-bottom: none;
 }
 
 .route-nearby-row--has-alt {
@@ -416,18 +522,20 @@ h3 {
 }
 
 .route-nearby-row--has-alt:hover {
-  border-color: var(--accent);
+  background: var(--bg-card);
+  border-radius: var(--radius);
 }
 
 .route-badge-sm {
   display: inline-block;
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: 3px;
   font-weight: 700;
   font-size: 0.85rem;
   text-align: center;
   vertical-align: baseline;
-  margin-right: 2px;
+  margin-right: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .route-nearby-row .direction-toggle {
@@ -466,7 +574,7 @@ h3 {
 .route-row-line2 {
   font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-top: 1px;
+  margin-top: 2px;
 }
 
 .later-link {
@@ -824,6 +932,98 @@ input[type="search"]:focus {
   .card {
     padding: var(--space-sm) var(--space-md);
   }
+}
+
+/* === Auth Forms === */
+
+.auth-card {
+  max-width: 24rem;
+  margin: var(--space-xl) auto;
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.auth-card h2 {
+  margin: 0 0 var(--space-lg);
+  text-align: center;
+}
+
+.auth-form label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.auth-form input[type="text"],
+.auth-form input[type="password"] {
+  display: block;
+  width: 100%;
+  padding: var(--space-sm);
+  margin-bottom: var(--space-md);
+  background: var(--bg-secondary);
+  color: var(--text-emphasis);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: var(--text-base);
+  font-family: var(--font-body);
+  box-sizing: border-box;
+}
+
+.auth-form input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.auth-form button[type="submit"] {
+  display: block;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  margin-top: var(--space-sm);
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 4px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-form button[type="submit"]:hover {
+  background: var(--accent-hover);
+}
+
+.auth-error {
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+  background: rgba(255, 107, 107, 0.15);
+  border: 1px solid var(--error);
+  border-radius: 4px;
+  color: var(--error);
+}
+
+.auth-hint {
+  margin: 0 0 var(--space-sm);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.auth-switch {
+  margin-top: var(--space-md);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.auth-switch a {
+  color: var(--accent);
+}
+
+/* Honeypot — hidden from humans */
+.hp-field {
+  display: none;
 }
 
 /* === Print === */

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"gobus/internal/geo"
-	"gobus/internal/storage"
 	"gobus/internal/templates"
 )
 
@@ -25,57 +24,11 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
 	data := templates.NearbyData{
-		Page: templates.Page{
-			Title:       "Nearby Departures",
-			CurrentPath: "/nearby",
-		},
+		Page: h.page("Nearby Departures", "/nearby"),
 		View:  view,
 		Lat:   latStr,
 		Lon:   lonStr,
 		Query: query,
-	}
-
-	// Geocode cross-street query if no coordinates provided
-	if latStr == "" && lonStr == "" && query != "" {
-		results, err := h.db.SearchStops(r.Context(), query)
-		if err != nil {
-			h.logger.Error("geocoding query", "query", query, "error", err)
-		}
-
-		if len(results) > 0 {
-			// GTFS cross-street match found
-			clusters := clusterSearchResults(results, 500)
-			if len(clusters) == 1 {
-				latStr = fmt.Sprintf("%.6f", clusters[0].Lat)
-				lonStr = fmt.Sprintf("%.6f", clusters[0].Lon)
-				data.Lat = latStr
-				data.Lon = lonStr
-			} else {
-				// Multiple distinct locations — show disambiguation
-				data.SearchResults = make([]templates.SearchResult, len(clusters))
-				for i, c := range clusters {
-					data.SearchResults[i] = templates.SearchResult{
-						Name: c.Name,
-						Lat:  fmt.Sprintf("%.6f", c.Lat),
-						Lon:  fmt.Sprintf("%.6f", c.Lon),
-					}
-				}
-			}
-		} else if latStr == "" {
-			// No GTFS match — fall back to Nominatim address geocoding
-			geoResult, err := h.geo.Search(r.Context(), query+", Minneapolis, MN")
-			if err != nil {
-				h.logger.Warn("nominatim geocoding failed", "query", query, "error", err)
-				data.SearchError = "Address lookup is unavailable. Try entering cross streets instead (e.g. \"Lake & Lyndale\") — that works offline."
-			} else if geoResult == nil {
-				data.SearchError = "No results found. Try nearby cross streets instead (e.g. \"Lake & Lyndale\") — cross-street search works even without internet."
-			} else {
-				latStr = fmt.Sprintf("%.6f", geoResult.Lat)
-				lonStr = fmt.Sprintf("%.6f", geoResult.Lon)
-				data.Lat = latStr
-				data.Lon = lonStr
-			}
-		}
 	}
 
 	// If we have coordinates, find nearby stops/routes
@@ -434,40 +387,3 @@ func formatDistance(meters float64) string {
 	return fmt.Sprintf("%.1f mi", miles)
 }
 
-// clusterSearchResults groups stop search results by proximity.
-// Results within radiusMeters of each other are merged into one cluster,
-// using the first result's name and the centroid of all members.
-type searchCluster struct {
-	Name string
-	Lat  float64
-	Lon  float64
-	n    int
-}
-
-func clusterSearchResults(results []storage.StopSearchResult, radiusMeters float64) []searchCluster {
-	var clusters []searchCluster
-	for _, r := range results {
-		merged := false
-		for i := range clusters {
-			dist := geo.Haversine(clusters[i].Lat, clusters[i].Lon, r.Lat, r.Lon)
-			if dist <= radiusMeters {
-				// Merge into existing cluster (running centroid)
-				n := float64(clusters[i].n)
-				clusters[i].Lat = (clusters[i].Lat*n + r.Lat) / (n + 1)
-				clusters[i].Lon = (clusters[i].Lon*n + r.Lon) / (n + 1)
-				clusters[i].n++
-				merged = true
-				break
-			}
-		}
-		if !merged {
-			clusters = append(clusters, searchCluster{
-				Name: r.Name,
-				Lat:  r.Lat,
-				Lon:  r.Lon,
-				n:    1,
-			})
-		}
-	}
-	return clusters
-}

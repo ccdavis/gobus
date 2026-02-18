@@ -126,4 +126,21 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_trips_service ON trips(service_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trips_route_direction ON trips(route_id, direction_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_calendar_dates_date ON calendar_dates(date)`,
+
+	// Users (auth)
+	`CREATE TABLE IF NOT EXISTS users (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		username        TEXT UNIQUE NOT NULL,
+		passphrase_hash TEXT NOT NULL,
+		created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
+
+	// Device sessions (per-user device tracking)
+	`CREATE TABLE IF NOT EXISTS device_sessions (
+		user_id   INTEGER NOT NULL REFERENCES users(id),
+		device_id TEXT NOT NULL,
+		last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+		PRIMARY KEY (user_id, device_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_device_sessions_user ON device_sessions(user_id, last_seen)`,
 }

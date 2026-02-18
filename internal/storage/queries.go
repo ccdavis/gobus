@@ -380,6 +380,81 @@ func (db *DB) RebuildRTree(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+// UserRow represents a registered user.
+type UserRow struct {
+	ID             int
+	Username       string
+	PassphraseHash string
+}
+
+// CreateUser inserts a new user. Returns the user ID.
+func (db *DB) CreateUser(ctx context.Context, username, passphraseHash string) (int64, error) {
+	result, err := db.ExecContext(ctx,
+		`INSERT INTO users (username, passphrase_hash) VALUES (?, ?)`,
+		username, passphraseHash)
+	if err != nil {
+		return 0, fmt.Errorf("create user: %w", err)
+	}
+	return result.LastInsertId()
+}
+
+// GetUserByUsername looks up a user by username. Returns sql.ErrNoRows if not found.
+func (db *DB) GetUserByUsername(ctx context.Context, username string) (*UserRow, error) {
+	var u UserRow
+	err := db.QueryRowContext(ctx,
+		`SELECT id, username, passphrase_hash FROM users WHERE username = ?`,
+		username).Scan(&u.ID, &u.Username, &u.PassphraseHash)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// CountUsers returns the total number of registered users.
+func (db *DB) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
+// UpsertDeviceSession records or updates a device's last-seen time for a user.
+func (db *DB) UpsertDeviceSession(ctx context.Context, userID int64, deviceID string) error {
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO device_sessions (user_id, device_id, last_seen) VALUES (?, ?, datetime('now'))
+		 ON CONFLICT(user_id, device_id) DO UPDATE SET last_seen = datetime('now')`,
+		userID, deviceID)
+	return err
+}
+
+// CountRecentDevices counts distinct devices for a user seen within the last N minutes.
+func (db *DB) CountRecentDevices(ctx context.Context, userID int64, windowMinutes int) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM device_sessions
+		 WHERE user_id = ? AND last_seen >= datetime('now', ?)`,
+		userID, fmt.Sprintf("-%d minutes", windowMinutes)).Scan(&count)
+	return count, err
+}
+
+// CountDevicesForUser returns the total number of device sessions for a user.
+func (db *DB) CountDevicesForUser(ctx context.Context, userID int64) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM device_sessions WHERE user_id = ?`,
+		userID).Scan(&count)
+	return count, err
+}
+
+// EvictOldestDevice removes the oldest device session for a user.
+func (db *DB) EvictOldestDevice(ctx context.Context, userID int64) error {
+	_, err := db.ExecContext(ctx,
+		`DELETE FROM device_sessions WHERE rowid = (
+			SELECT rowid FROM device_sessions WHERE user_id = ?
+			ORDER BY last_seen ASC LIMIT 1
+		)`, userID)
+	return err
+}
+
 // dayColumn returns the SQLite column name for a given weekday.
 func dayColumn(d time.Weekday) string {
 	switch d {

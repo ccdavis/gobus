@@ -2,8 +2,9 @@ package templates
 
 // Page is the base data passed to all page templates.
 type Page struct {
-	Title       string
-	CurrentPath string // For nav highlighting
+	Title        string
+	CurrentPath  string // For nav highlighting
+	AssetVersion string // Content hash for cache-busting static assets
 }
 
 // Layout renders the full HTML page shell with accessible landmarks.
@@ -14,7 +15,7 @@ templ Layout(page Page) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ page.Title } — GoBus</title>
-			<link rel="stylesheet" href="/static/css/main.css"/>
+			<link rel="stylesheet" href={ "/static/css/main.css?v=" + page.AssetVersion }/>
 			<link rel="manifest" href="/manifest.json"/>
 			<meta name="theme-color" content="#1a1a2e"/>
 			<meta name="description" content="Real-time Metro Transit departures for Minneapolis/St. Paul"/>
@@ -40,7 +41,12 @@ templ Layout(page Page) {
 						}
 					>Route Explorer</a>
 				</nav>
-				<h1>GoBus</h1>
+				<div class="header-row">
+					<h1>GoBus</h1>
+					<form method="POST" action="/logout" class="logout-form">
+						<button type="submit" class="logout-btn">Log out</button>
+					</form>
+				</div>
 			</header>
 			<main id="main" role="main">
 				{ children... }
@@ -57,9 +63,9 @@ templ Layout(page Page) {
 			<footer role="contentinfo">
 				<p>GoBus — Metro Transit departure info</p>
 			</footer>
-			<script src="/static/js/htmx.min.js"></script>
-			<script src="/static/js/htmx-sse.js"></script>
-			<script src="/static/js/app.js"></script>
+			<script src={ "/static/js/htmx.min.js?v=" + page.AssetVersion }></script>
+			<script src={ "/static/js/htmx-sse.js?v=" + page.AssetVersion }></script>
+			<script src={ "/static/js/app.js?v=" + page.AssetVersion }></script>
 		</body>
 	</html>
 }

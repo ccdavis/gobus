@@ -49,10 +49,7 @@ func (h *Handler) StopDetail(w http.ResponseWriter, r *http.Request) {
 	alerts := h.alertsForStop(ctx, stopID)
 
 	data := templates.StopDetailData{
-		Page: templates.Page{
-			Title:       fmt.Sprintf("Stop %s", stopName),
-			CurrentPath: "",
-		},
+		Page: h.page(fmt.Sprintf("Stop %s", stopName), ""),
 		StopID:     stopID,
 		StopName:   stopName,
 		StopCode:   stopCode,

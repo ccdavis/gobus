@@ -81,10 +81,7 @@ func (h *Handler) LaterArrivals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := templates.LaterArrivalsData{
-		Page: templates.Page{
-			Title:       fmt.Sprintf("Route %s at %s", routeShort, stopName),
-			CurrentPath: "",
-		},
+		Page: h.page(fmt.Sprintf("Route %s at %s", routeShort, stopName), ""),
 		StopID:         stopID,
 		StopName:       stopName,
 		RouteID:        routeID,

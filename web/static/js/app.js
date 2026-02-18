@@ -9,6 +9,11 @@
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(function () { console.log('SW registered'); })
       .catch(function (err) { console.warn('SW registration failed:', err); });
+
+    // Force Safari (and all browsers) to check for SW updates on every page load
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then(function (reg) { reg.update(); });
+    }
   }
 
   // --- Saved Locations ---
@@ -224,10 +229,12 @@
   var latInput = document.getElementById('lat');
   var lonInput = document.getElementById('lon');
   var locationStatus = document.getElementById('location-status');
-  var manualEntry = document.getElementById('manual-entry');
 
   if (nearbyForm && latInput && lonInput) {
-    // Check if lat/lon already provided (e.g. from manual entry or saved location)
+    var currentView = new URLSearchParams(window.location.search).get('view') || 'routes';
+    var searchURL = '/search?view=' + encodeURIComponent(currentView);
+
+    // Check if lat/lon already provided (e.g. from saved location or search redirect)
     if (!(latInput.value && lonInput.value)) {
       if ('geolocation' in navigator) {
         if (locationStatus) {
@@ -251,16 +258,12 @@
           function (err) {
             if (locationStatus) {
               if (err.code === 1) {
-                // PERMISSION_DENIED
-                locationStatus.textContent =
-                  'Location is blocked by your browser. You can enable it in your browser settings, or enter an address below.';
+                locationStatus.innerHTML =
+                  'Location is blocked by your browser. <a href="' + searchURL + '">Search for a location</a> instead, or enable location in browser settings.';
               } else {
-                locationStatus.textContent =
-                  'Could not determine your location. Enter an address or intersection below.';
+                locationStatus.innerHTML =
+                  'Could not determine your location. <a href="' + searchURL + '">Search for a location</a> instead.';
               }
-            }
-            if (manualEntry) {
-              manualEntry.removeAttribute('hidden');
             }
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
@@ -268,10 +271,8 @@
       } else {
         // Geolocation not supported
         if (locationStatus) {
-          locationStatus.textContent = 'Location services not available. Enter an address below.';
-        }
-        if (manualEntry) {
-          manualEntry.removeAttribute('hidden');
+          locationStatus.innerHTML =
+            'Location services not available. <a href="' + searchURL + '">Search for a location</a> instead.';
         }
       }
     }
