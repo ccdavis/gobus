@@ -133,7 +133,12 @@ templ NearbyPage(data NearbyData) {
 		<section aria-label="Nearby departures">
 			<div class="nearby-header">
 				<h2>Nearby Departures</h2>
-				<a href={ templ.SafeURL(fmt.Sprintf("/search?view=%s", data.View)) } class="change-location-link">Change location</a>
+				<div class="nearby-header-right">
+					if nearbyLocationLabel(data) != "" {
+						<span class="location-label" role="status" aria-label={ "Current location: " + nearbyLocationLabel(data) }>{ nearbyLocationLabel(data) }</span>
+					}
+					<a href={ templ.SafeURL(fmt.Sprintf("/search?view=%s", data.View)) } class="change-location-link" aria-label="Change location">Change</a>
+				</div>
 			</div>
 			<div id="saved-locations" aria-label="Saved locations" hidden></div>
 			<div id="location-status" aria-live="polite"></div>
@@ -278,14 +283,21 @@ templ routeRowContent(routeShort string, routeColor string, routeTextColor strin
 			</span>
 		}
 		<span class="route-row-info">
-			arriving in { fmt.Sprintf("%d", minutesAway) } min.
-			if isRealtime {
-				<span class={ templ.KV("departure-late", isLate) }>{ realtime }</span>
-				<span class="sched-note">(sched. { scheduled })</span>
-			} else {
-				{ scheduled }
-			}
-			at { stopName }
+			<span class="sr-only">{ departureAria(minutesAway, isRealtime, isLate, realtime, scheduled, stopName) }</span>
+			<span aria-hidden="true">
+				<span class="minutes-badge">{ fmt.Sprintf("%d", minutesAway) } min</span>
+				<span class="info-sep"> at </span>
+				if isRealtime {
+					<span class={ "route-row-time", templ.KV("departure-late", isLate) }>{ realtime }</span>
+					if isLate {
+						<span class="late-label">late</span>
+					}
+					<span class="sched-note">(sched. { scheduled })</span>
+				} else {
+					<span class="route-row-time">{ scheduled }</span>
+				}
+				<span class="info-sep"> at </span>{ stopName }
+			</span>
 		</span>
 	</div>
 	<div class="route-row-line2">
@@ -431,6 +443,9 @@ templ DepartureRow(dep DepartureInfo) {
 templ departureTime(isRealtime bool, isLate bool, realtime string, scheduled string, minutesAway int) {
 	if isRealtime {
 		<span class={ "departure-time", templ.KV("departure-late", isLate) }>{ realtime }</span>
+		if isLate {
+			<span class="late-label">late</span>
+		}
 		<span class="departure-scheduled">
 			(sched. { scheduled })
 		</span>
@@ -457,6 +472,32 @@ templ AlertSection(alerts []AlertDisplay) {
 			</div>
 		}
 	</section>
+}
+
+func nearbyLocationLabel(data NearbyData) string {
+	if data.Query != "" {
+		return data.Query
+	}
+	// For geolocation, use the nearest stop name as a rough indicator
+	if len(data.Routes) > 0 {
+		return data.Routes[0].StopName
+	}
+	if len(data.StopViews) > 0 {
+		return data.StopViews[0].StopName
+	}
+	return ""
+}
+
+func departureAria(minutesAway int, isRealtime bool, isLate bool, realtime string, scheduled string, stopName string) string {
+	t := scheduled
+	if isRealtime {
+		t = realtime
+	}
+	s := fmt.Sprintf("Departs in %d minutes, at %s, from %s", minutesAway, t, stopName)
+	if isRealtime && isLate {
+		s = fmt.Sprintf("Departs in %d minutes, at %s, running late, scheduled %s, from %s", minutesAway, realtime, scheduled, stopName)
+	}
+	return s
 }
 
 func altStopID(altID, fallback string) string {

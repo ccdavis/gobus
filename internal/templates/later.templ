@@ -51,6 +51,9 @@ templ LaterArrivalsPage(data LaterArrivalsData) {
 							<div class="later-time">
 								if dep.IsRealtime {
 									<span class={ "departure-time", templ.KV("departure-late", dep.IsLate) }>{ dep.Realtime }</span>
+									if dep.IsLate {
+										<span class="late-label">late</span>
+									}
 									<span class="departure-scheduled">(sched. { dep.Scheduled })</span>
 								} else {
 									<span class="departure-time">{ dep.Scheduled }</span>

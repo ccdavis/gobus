@@ -6,14 +6,18 @@
   --bg-secondary: #16213e;
   --bg-card: #0f3460;
   --text-primary: #e8e8e8;
-  --text-secondary: #b0b0b0;
+  --text-secondary: #b8b2a8;
   --text-emphasis: #ffffff;
   --accent: #4cc9f0;
   --accent-hover: #72d6f5;
-  --border: #2a2a4a;
+  --border: #2d2d50;
   --error: #ff6b6b;
   --success: #51cf66;
   --warning: #ffd43b;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --time-highlight: #e8d44d;
+  --late: #f0883e;
 
   /* Spacing */
   --space-xs: 0.25rem;
@@ -49,6 +53,10 @@
     --accent: #0066cc;
     --accent-hover: #0052a3;
     --border: #d0d0d0;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.12);
+    --time-highlight: #7a6200;
+    --late: #c45a00;
   }
 }
 
@@ -63,6 +71,8 @@
   --accent: #4cc9f0;
   --accent-hover: #72d6f5;
   --border: #2a2a4a;
+  --time-highlight: #e8d44d;
+  --late: #f0883e;
 }
 
 /* User override: force light */
@@ -76,6 +86,10 @@
   --accent: #0066cc;
   --accent-hover: #0052a3;
   --border: #d0d0d0;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --time-highlight: #7a6200;
+  --late: #c45a00;
 }
 
 /* High contrast mode */
@@ -94,6 +108,18 @@
 
 [hidden] {
   display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 *,
@@ -149,12 +175,22 @@ header[role="banner"] {
   background: var(--bg-secondary);
   padding: var(--space-md) var(--space-lg);
   border-bottom: 2px solid var(--border);
+  border-top: 3px solid var(--accent);
 }
 
 header h1 {
   margin: 0;
   font-size: var(--text-xl);
   color: var(--text-emphasis);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+header h1 .logo-icon {
+  flex-shrink: 0;
 }
 
 .header-row {
@@ -192,6 +228,7 @@ nav a {
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius);
   font-weight: 600;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 nav a:hover {
@@ -241,6 +278,13 @@ h3 {
   border-radius: var(--radius-lg);
   padding: var(--space-md) var(--space-lg);
   margin-bottom: var(--space-md);
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-1px);
 }
 
 /* === Route badge === */
@@ -280,7 +324,15 @@ h3 {
 }
 
 .departure-late {
-  color: var(--warning);
+  color: var(--late);
+}
+
+.late-label {
+  font-size: 0.75em;
+  font-weight: 700;
+  color: var(--late);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 /* === Departure row layout === */
@@ -339,6 +391,18 @@ h3 {
 
 .nearby-header h2 {
   margin: 0;
+}
+
+.nearby-header-right {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.location-label {
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .change-location-link {
@@ -425,6 +489,10 @@ h3 {
   margin-bottom: -2px;
 }
 
+.nearby-tab {
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
 .nearby-tab:hover {
   color: var(--text-primary);
 }
@@ -509,8 +577,8 @@ h3 {
 .route-nearby-row {
   padding: var(--space-sm) 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.9rem;
-  line-height: 1.4;
+  font-size: 1rem;
+  line-height: 1.45;
 }
 
 .route-nearby-row:last-child {
@@ -521,9 +589,17 @@ h3 {
   cursor: pointer;
 }
 
+.route-nearby-row {
+  transition: background 0.15s ease;
+}
+
 .route-nearby-row--has-alt:hover {
   background: var(--bg-card);
   border-radius: var(--radius);
+}
+
+.route-nearby-row:hover {
+  background: rgba(76, 201, 240, 0.04);
 }
 
 .route-badge-sm {
@@ -544,7 +620,7 @@ h3 {
   background: transparent;
   color: var(--accent);
   border: none;
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   margin: 0;
@@ -564,21 +640,31 @@ h3 {
 
 .route-row-info {
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
+}
+
+.route-row-time {
+  font-weight: 700;
+  color: var(--text-emphasis);
+}
+
+.info-sep {
+  color: var(--text-secondary);
+  opacity: 0.6;
 }
 
 .sched-note {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 .route-row-line2 {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
   margin-top: 2px;
 }
 
 .later-link {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--accent);
   text-decoration: none;
   white-space: nowrap;
@@ -616,7 +702,7 @@ h3 {
   font-weight: 600;
   cursor: pointer;
   text-align: center;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
 .btn-more:hover {
@@ -706,11 +792,17 @@ button,
   font-weight: 600;
   cursor: pointer;
   text-decoration: none;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 button:hover,
 .btn:hover {
   background: var(--accent-hover);
+}
+
+button:active,
+.btn:active {
+  transform: scale(0.98);
 }
 
 button:disabled {
@@ -911,6 +1003,15 @@ input[type="search"]:focus {
   font-size: 0.85rem;
 }
 
+/* === Minutes badge (nearby routes view) === */
+
+.minutes-badge {
+  color: var(--time-highlight);
+  font-weight: 700;
+  font-size: 1.05em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* === Loading states === */
 
 .loading {
@@ -943,6 +1044,7 @@ input[type="search"]:focus {
   background: var(--bg-card);
   border-radius: 8px;
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
 }
 
 .auth-card h2 {
@@ -1024,6 +1126,17 @@ input[type="search"]:focus {
 /* Honeypot — hidden from humans */
 .hp-field {
   display: none;
+}
+
+/* === Reduced motion === */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 /* === Print === */
