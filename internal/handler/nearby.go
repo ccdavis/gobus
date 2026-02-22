@@ -11,8 +11,10 @@ import (
 	"gobus/internal/templates"
 )
 
-// radiusTiers defines the progressive search radii in meters.
-var radiusTiers = []float64{400, 800, 1600, 3200, 6400, 12800}
+// radiusTiers defines the progressive search half-sides in meters.
+// Each tier represents a square box with side = 2 * radius.
+// Tuned for Minneapolis grid: ~201m N-S blocks, ~101m E-W blocks.
+var radiusTiers = []float64{450, 900, 1800, 3600, 7200, 14400}
 
 // nextRadius returns the next radius tier above the given radius.
 // Returns 0, false if already at or above the maximum.
@@ -27,20 +29,20 @@ func nextRadius(current float64) (float64, bool) {
 
 // dbLimitForRadius returns the R-Tree query limit and display stop limit
 // for a given search radius.
-func dbLimitForRadius(radiusMeters float64) (dbLimit, displayLimit int) {
+func dbLimitForRadius(halfSideMeters float64) (dbLimit, displayLimit int) {
 	switch {
-	case radiusMeters <= 400:
-		return 10, 5
-	case radiusMeters <= 800:
-		return 20, 10
-	case radiusMeters <= 1600:
-		return 30, 15
-	case radiusMeters <= 3200:
-		return 50, 20
-	case radiusMeters <= 6400:
-		return 75, 30
+	case halfSideMeters <= 450:
+		return 15, 10
+	case halfSideMeters <= 900:
+		return 40, 25
+	case halfSideMeters <= 1800:
+		return 80, 50
+	case halfSideMeters <= 3600:
+		return 150, 100
+	case halfSideMeters <= 7200:
+		return 300, 200
 	default:
-		return 100, 40
+		return 500, 300
 	}
 }
 
@@ -130,28 +132,29 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 					h.logger.Error("finding nearby routes", "error", err)
 				} else {
 					// Auto-advance through empty radius tiers
-					totalShown := offset + len(routes)
-					for !hasMore && len(routes) == 0 && totalShown > 0 {
+					newOffset := offset + len(routes)
+					for !hasMore && len(routes) == 0 && newOffset > 0 {
 						nextR, ok := nextRadius(radius)
 						if !ok {
 							break
 						}
 						radius = nextR
-						routes, hasMore, err = h.findNearbyRoutes(r, lat, lon, totalShown, limit, radius)
+						routes, hasMore, err = h.findNearbyRoutes(r, lat, lon, newOffset, limit, radius)
 						if err != nil {
 							h.logger.Error("finding nearby routes", "error", err)
 							break
 						}
+						newOffset += len(routes)
 					}
 					data.Routes = routes
 					data.HasStops = len(routes) > 0 || offset > 0
 					if hasMore {
 						data.HasMore = true
-						data.MoreURL = buildRoutesMoreURL(latStr, lonStr, offset+len(routes), radius)
-					} else if offset+len(routes) > 0 {
+						data.MoreURL = buildRoutesMoreURL(latStr, lonStr, newOffset, radius)
+					} else if newOffset > 0 {
 						if nextR, ok := nextRadius(radius); ok {
 							data.HasMore = true
-							data.MoreURL = buildRoutesMoreURL(latStr, lonStr, offset+len(routes), nextR)
+							data.MoreURL = buildRoutesMoreURL(latStr, lonStr, newOffset, nextR)
 						}
 					}
 				}
@@ -188,24 +191,20 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 // findNearbyRoutes builds the flat route-first nearby view data.
 // It queries a wider area than the stop view, groups departures by route+direction,
 // pairs opposite directions across nearby stops, computes intervals, and paginates.
-func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, limit int, radiusMeters float64) ([]templates.RouteNearbyRow, bool, error) {
+func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, limit int, halfSide float64) ([]templates.RouteNearbyRow, bool, error) {
 	ctx := r.Context()
 	now := time.Now()
 
 	const companionRadius = 50.0
-	dbLimit, displayLimit := dbLimitForRadius(radiusMeters)
-	latDeg, lonDeg := geo.BoundingBoxRadius(lat, radiusMeters)
-	radiusDeg := latDeg
-	if lonDeg > radiusDeg {
-		radiusDeg = lonDeg
-	}
+	dbLimit, displayLimit := dbLimitForRadius(halfSide)
+	latDeg, lonDeg := geo.BoundingBoxRadius(lat, halfSide)
 
-	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, dbLimit)
+	rows, err := h.db.NearbyStops(ctx, lat, lon, latDeg, lonDeg, dbLimit)
 	if err != nil {
 		return nil, false, fmt.Errorf("query nearby stops: %w", err)
 	}
 
-	// Compute Haversine distances
+	// Compute distances for ordering (Haversine for display accuracy)
 	type stopWithDist struct {
 		row      int
 		distance float64
@@ -213,9 +212,7 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 	var allStops []stopWithDist
 	for i, row := range rows {
 		dist := geo.Haversine(lat, lon, row.StopLat, row.StopLon)
-		if dist <= radiusMeters {
-			allStops = append(allStops, stopWithDist{row: i, distance: dist})
-		}
+		allStops = append(allStops, stopWithDist{row: i, distance: dist})
 	}
 
 	// Take top display stops (scaled by radius)
@@ -393,23 +390,19 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 
 // findNearbyStopsView builds the stop-first view data with pagination.
 // Each stop shows all routes serving it, with no cross-stop pairing.
-func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset, limit int, radiusMeters float64) ([]templates.StopViewData, bool, error) {
+func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset, limit int, halfSide float64) ([]templates.StopViewData, bool, error) {
 	ctx := r.Context()
 	now := time.Now()
 
-	dbLimit, _ := dbLimitForRadius(radiusMeters)
-	latDeg, lonDeg := geo.BoundingBoxRadius(lat, radiusMeters)
-	radiusDeg := latDeg
-	if lonDeg > radiusDeg {
-		radiusDeg = lonDeg
-	}
+	dbLimit, _ := dbLimitForRadius(halfSide)
+	latDeg, lonDeg := geo.BoundingBoxRadius(lat, halfSide)
 
-	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, dbLimit)
+	rows, err := h.db.NearbyStops(ctx, lat, lon, latDeg, lonDeg, dbLimit)
 	if err != nil {
 		return nil, false, fmt.Errorf("query nearby stops: %w", err)
 	}
 
-	// Compute Haversine distances, filter to max radius
+	// Compute distances for ordering (Haversine for display accuracy)
 	type stopWithDist struct {
 		row      int
 		distance float64
@@ -417,9 +410,7 @@ func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset,
 	var allStops []stopWithDist
 	for i, row := range rows {
 		dist := geo.Haversine(lat, lon, row.StopLat, row.StopLon)
-		if dist <= radiusMeters {
-			allStops = append(allStops, stopWithDist{row: i, distance: dist})
-		}
+		allStops = append(allStops, stopWithDist{row: i, distance: dist})
 	}
 
 	// Paginate

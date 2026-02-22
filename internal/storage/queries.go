@@ -41,7 +41,7 @@ type NearbyStopRow struct {
 
 // NearbyStops finds stops within a bounding box using the R-Tree index.
 // The caller should refine distances with Haversine and re-sort.
-func (db *DB) NearbyStops(ctx context.Context, lat, lon, radiusDeg float64, limit int) ([]NearbyStopRow, error) {
+func (db *DB) NearbyStops(ctx context.Context, lat, lon, latDeg, lonDeg float64, limit int) ([]NearbyStopRow, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT s.stop_id, s.stop_code, s.stop_name, s.stop_desc,
 		       s.stop_lat, s.stop_lon,
@@ -52,8 +52,8 @@ func (db *DB) NearbyStops(ctx context.Context, lat, lon, radiusDeg float64, limi
 		  AND r.min_lon >= ? AND r.max_lon <= ?
 		ORDER BY (s.stop_lat - ?)*(s.stop_lat - ?) + (s.stop_lon - ?)*(s.stop_lon - ?)
 		LIMIT ?`,
-		lat-radiusDeg, lat+radiusDeg,
-		lon-radiusDeg, lon+radiusDeg,
+		lat-latDeg, lat+latDeg,
+		lon-lonDeg, lon+lonDeg,
 		lat, lat, lon, lon,
 		limit,
 	)

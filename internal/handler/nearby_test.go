@@ -59,15 +59,15 @@ func TestNextRadius(t *testing.T) {
 		wantRadius float64
 		wantOK     bool
 	}{
-		{"zero gets first tier", 0, 400, true},
-		{"below first tier", 200, 400, true},
-		{"at first tier", 400, 800, true},
-		{"between tiers", 600, 800, true},
-		{"at second tier", 800, 1600, true},
-		{"at third tier", 1600, 3200, true},
-		{"at fourth tier", 3200, 6400, true},
-		{"at fifth tier", 6400, 12800, true},
-		{"at max tier", 12800, 0, false},
+		{"zero gets first tier", 0, 450, true},
+		{"below first tier", 200, 450, true},
+		{"at first tier", 450, 900, true},
+		{"between tiers", 600, 900, true},
+		{"at second tier", 900, 1800, true},
+		{"at third tier", 1800, 3600, true},
+		{"at fourth tier", 3600, 7200, true},
+		{"at fifth tier", 7200, 14400, true},
+		{"at max tier", 14400, 0, false},
 		{"above max tier", 20000, 0, false},
 	}
 
@@ -98,17 +98,17 @@ func TestDbLimitForRadius(t *testing.T) {
 		wantDB      int
 		wantDisplay int
 	}{
-		{"very small radius", 200, 10, 5},
-		{"at 400m", 400, 10, 5},
-		{"at 600m", 600, 20, 10},
-		{"at 800m", 800, 20, 10},
-		{"at 1200m", 1200, 30, 15},
-		{"at 1600m", 1600, 30, 15},
-		{"at 3200m", 3200, 50, 20},
-		{"at 5000m", 5000, 75, 30},
-		{"at 6400m", 6400, 75, 30},
-		{"at 12800m", 12800, 100, 40},
-		{"very large", 50000, 100, 40},
+		{"very small radius", 200, 15, 10},
+		{"at 450m", 450, 15, 10},
+		{"at 600m", 600, 40, 25},
+		{"at 900m", 900, 40, 25},
+		{"at 1200m", 1200, 80, 50},
+		{"at 1800m", 1800, 80, 50},
+		{"at 3600m", 3600, 150, 100},
+		{"at 5000m", 5000, 300, 200},
+		{"at 7200m", 7200, 300, 200},
+		{"at 14400m", 14400, 500, 300},
+		{"very large", 50000, 500, 300},
 	}
 
 	for _, tt := range tests {
