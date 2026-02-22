@@ -62,7 +62,7 @@ func (h *Handler) ServiceWorker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 	w.Header().Set("Service-Worker-Allowed", "/")
 	w.Header().Set("Cache-Control", "no-cache")
-	fmt.Fprintf(w, serviceWorkerScript, h.version, h.version)
+	fmt.Fprintf(w, serviceWorkerScript, h.version)
 }
 
 const serviceWorkerScript = `// GoBus Service Worker — auto-generated with asset version

@@ -1,15 +1,12 @@
 package server
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	"gobus/internal/handler"
 	"gobus/internal/storage"
 )
 
@@ -113,7 +110,7 @@ func requireAuth(next http.Handler, secret []byte, db *storage.DB) http.Handler 
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		userID := parseCookie(cookie.Value, secret)
+		userID := handler.VerifyCookie(cookie.Value, secret)
 		if userID == 0 {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
@@ -126,31 +123,6 @@ func requireAuth(next http.Handler, secret []byte, db *storage.DB) http.Handler 
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// parseCookie verifies a "userID.expiry.hmac" cookie value.
-// Returns userID on success, 0 on failure.
-func parseCookie(value string, secret []byte) int64 {
-	parts := strings.SplitN(value, ".", 3)
-	if len(parts) != 3 {
-		return 0
-	}
-	payload := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(payload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(parts[2]), []byte(expected)) {
-		return 0
-	}
-	expiry, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || time.Now().Unix() > expiry {
-		return 0
-	}
-	userID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || userID <= 0 {
-		return 0
-	}
-	return userID
 }
 
 func requestLogger(next http.Handler, logger *slog.Logger) http.Handler {

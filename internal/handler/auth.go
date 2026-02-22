@@ -36,14 +36,16 @@ func (h *Handler) signCookie(userID int64) string {
 	return payload + "." + sig
 }
 
-// verifyCookie checks "userID.expiry.hmac". Returns userID or 0 on failure.
-func (h *Handler) verifyCookie(value string) int64 {
+// VerifyCookie checks a "userID.expiry.hmac" cookie value.
+// Returns userID on success, 0 on failure.
+// Exported so middleware can share the same implementation.
+func VerifyCookie(value string, secret []byte) int64 {
 	parts := strings.SplitN(value, ".", 3)
 	if len(parts) != 3 {
 		return 0
 	}
 	payload := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, h.cookieSecret)
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(parts[2]), []byte(expected)) {
@@ -58,6 +60,11 @@ func (h *Handler) verifyCookie(value string) int64 {
 		return 0
 	}
 	return userID
+}
+
+// verifyCookie is a convenience method that calls the shared VerifyCookie.
+func (h *Handler) verifyCookie(value string) int64 {
+	return VerifyCookie(value, h.cookieSecret)
 }
 
 // setCookie sets the session cookie on the response.
@@ -117,22 +124,20 @@ func (h *Handler) checkDeviceLimits(r *http.Request, userID int64, deviceID stri
 
 	// Check temporal limit: too many distinct devices in the rolling window?
 	if h.cfg.MaxDevicesRecent > 0 {
-		recent, err := h.db.CountRecentDevices(ctx, userID, h.cfg.DeviceWindowMin)
+		// First check if this device is already known in the window
+		alreadyKnown, err := h.db.IsDeviceRecent(ctx, userID, deviceID, h.cfg.DeviceWindowMin)
 		if err != nil {
-			h.logger.Error("device limit: count recent", "error", err)
-			return ""
+			h.logger.Error("device limit: check device recent", "error", err)
+			return "Something went wrong. Please try again."
 		}
-		// If this device is already one of the recent ones, it doesn't count as new
-		if recent >= h.cfg.MaxDevicesRecent {
-			// Check if this specific device is already in the window
-			// (if so, it's fine — we're not adding a new device)
-			h.db.UpsertDeviceSession(ctx, userID, deviceID)
-			recheck, _ := h.db.CountRecentDevices(ctx, userID, h.cfg.DeviceWindowMin)
-			if recheck > h.cfg.MaxDevicesRecent {
-				// Remove the device we just added — it pushed us over
-				h.db.ExecContext(ctx,
-					`DELETE FROM device_sessions WHERE user_id = ? AND device_id = ?`,
-					userID, deviceID)
+		if !alreadyKnown {
+			// This would be a new device — check if we're at the limit
+			recent, err := h.db.CountRecentDevices(ctx, userID, h.cfg.DeviceWindowMin)
+			if err != nil {
+				h.logger.Error("device limit: count recent", "error", err)
+				return "Something went wrong. Please try again."
+			}
+			if recent >= h.cfg.MaxDevicesRecent {
 				return fmt.Sprintf("Too many devices. This account is active on %d devices right now. Please try again later.", recent)
 			}
 		}
@@ -143,7 +148,7 @@ func (h *Handler) checkDeviceLimits(r *http.Request, userID int64, deviceID stri
 		total, err := h.db.CountDevicesForUser(ctx, userID)
 		if err != nil {
 			h.logger.Error("device limit: count total", "error", err)
-			return ""
+			return "Something went wrong. Please try again."
 		}
 		for total >= h.cfg.MaxDevicesTotal {
 			if err := h.db.EvictOldestDevice(ctx, userID); err != nil {
@@ -191,6 +196,17 @@ func (h *Handler) verifyTimeGate(token string) bool {
 		return false
 	}
 	return time.Now().Unix()-ts >= timeGateMinSec
+}
+
+// TestSignCookie creates a signed cookie for testing purposes.
+// expiryOffset is seconds from now (positive = future, negative = expired).
+func TestSignCookie(userID int64, expiryOffset int64, secret []byte) string {
+	expiry := time.Now().Unix() + expiryOffset
+	payload := fmt.Sprintf("%d.%d", userID, expiry)
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return payload + "." + sig
 }
 
 // --- Handlers ---

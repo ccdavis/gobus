@@ -67,7 +67,10 @@ func computeAssetVersion(staticFS fs.FS) string {
 		if err != nil {
 			continue
 		}
-		io.Copy(h, f)
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			continue
+		}
 		f.Close()
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))[:8]

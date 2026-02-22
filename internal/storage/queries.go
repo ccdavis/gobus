@@ -436,6 +436,16 @@ func (db *DB) CountRecentDevices(ctx context.Context, userID int64, windowMinute
 	return count, err
 }
 
+// IsDeviceRecent checks if a specific device was seen within the rolling window.
+func (db *DB) IsDeviceRecent(ctx context.Context, userID int64, deviceID string, windowMinutes int) (bool, error) {
+	var count int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM device_sessions
+		 WHERE user_id = ? AND device_id = ? AND last_seen >= datetime('now', ?)`,
+		userID, deviceID, fmt.Sprintf("-%d minutes", windowMinutes)).Scan(&count)
+	return count > 0, err
+}
+
 // CountDevicesForUser returns the total number of device sessions for a user.
 func (db *DB) CountDevicesForUser(ctx context.Context, userID int64) (int, error) {
 	var count int

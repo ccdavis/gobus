@@ -118,23 +118,23 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 
 	// Take top 20 display stops (wider net than stop view)
 	displayLimit := 20
-	if len(allStops) > displayLimit {
-		allStops = allStops[:displayLimit]
+	displayStops := allStops
+	if len(displayStops) > displayLimit {
+		displayStops = allStops[:displayLimit]
 	}
 	displayStopIDs := make(map[string]bool)
-	for _, sd := range allStops {
+	for _, sd := range displayStops {
 		displayStopIDs[rows[sd.row].StopID] = true
 	}
 
-	// Companion stops within 50m of display stops
+	// Companion stops: remaining stops within 50m of a display stop
 	var companionStops []stopWithDist
-	for i := displayLimit; i < len(allStops); i++ {
-		candidate := allStops[i]
+	for _, candidate := range allStops[len(displayStops):] {
 		cRow := rows[candidate.row]
 		if displayStopIDs[cRow.StopID] {
 			continue
 		}
-		for _, ds := range allStops[:displayLimit] {
+		for _, ds := range displayStops {
 			dRow := rows[ds.row]
 			dist := geo.Haversine(dRow.StopLat, dRow.StopLon, cRow.StopLat, cRow.StopLon)
 			if dist <= companionRadius {
@@ -160,7 +160,7 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 	groups := make(map[routeKey]*routeGroup)
 	var order []routeKey
 
-	fetchStops := append(allStops, companionStops...)
+	fetchStops := append(displayStops, companionStops...)
 	for _, sd := range fetchStops {
 		row := rows[sd.row]
 		deps := h.fetchDepartures(ctx, row.StopID, now, 30)

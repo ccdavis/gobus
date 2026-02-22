@@ -41,13 +41,12 @@ func (c *Client) DeparturesForStop(ctx context.Context, stopID string) (*Respons
 	if err != nil {
 		return nil, fmt.Errorf("departures for stop %s: %w", stopID, err)
 	}
+	defer resp.Body.Close()
 
 	var result Response
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		resp.Body.Close()
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	resp.Body.Close()
 
 	c.cache.Set(cacheKey, &result)
 	return &result, nil
@@ -65,13 +64,12 @@ func (c *Client) DeparturesForRouteStop(ctx context.Context, routeID string, dir
 	if err != nil {
 		return nil, fmt.Errorf("departures for route stop: %w", err)
 	}
+	defer resp.Body.Close()
 
 	var result Response
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		resp.Body.Close()
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	resp.Body.Close()
 
 	c.cache.Set(cacheKey, &result)
 	return &result, nil
@@ -88,13 +86,12 @@ func (c *Client) Routes(ctx context.Context) ([]RouteResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch routes: %w", err)
 	}
+	defer resp.Body.Close()
 
 	var result []RouteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		resp.Body.Close()
 		return nil, fmt.Errorf("decode routes: %w", err)
 	}
-	resp.Body.Close()
 
 	c.cache.Set("routes", result)
 	return result, nil
@@ -112,13 +109,12 @@ func (c *Client) Directions(ctx context.Context, routeID string) ([]DirectionRes
 	if err != nil {
 		return nil, fmt.Errorf("fetch directions: %w", err)
 	}
+	defer resp.Body.Close()
 
 	var result []DirectionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		resp.Body.Close()
 		return nil, fmt.Errorf("decode directions: %w", err)
 	}
-	resp.Body.Close()
 
 	c.cache.Set(cacheKey, result)
 	return result, nil
