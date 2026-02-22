@@ -11,6 +11,49 @@ import (
 	"gobus/internal/templates"
 )
 
+// radiusTiers defines the progressive search radii in meters.
+var radiusTiers = []float64{800, 1600, 3200, 6400, 12800}
+
+// nextRadius returns the next radius tier above the given radius.
+// Returns 0, false if already at or above the maximum.
+func nextRadius(current float64) (float64, bool) {
+	for _, tier := range radiusTiers {
+		if tier > current {
+			return tier, true
+		}
+	}
+	return 0, false
+}
+
+// dbLimitForRadius returns the R-Tree query limit and display stop limit
+// for a given search radius.
+func dbLimitForRadius(radiusMeters float64) (dbLimit, displayLimit int) {
+	switch {
+	case radiusMeters <= 800:
+		return 20, 10
+	case radiusMeters <= 1600:
+		return 30, 15
+	case radiusMeters <= 3200:
+		return 50, 20
+	case radiusMeters <= 6400:
+		return 75, 30
+	default:
+		return 100, 40
+	}
+}
+
+// buildRoutesMoreURL constructs the "show more" URL for the routes view.
+func buildRoutesMoreURL(lat, lon string, offset int, radius float64) string {
+	return fmt.Sprintf("/nearby?view=routes&lat=%s&lon=%s&offset=%d&radius=%.0f&partial=1",
+		lat, lon, offset, radius)
+}
+
+// buildStopsMoreURL constructs the "show more" URL for the stops view.
+func buildStopsMoreURL(lat, lon string, offset int, radius float64) string {
+	return fmt.Sprintf("/nearby?view=stops&lat=%s&lon=%s&offset=%d&radius=%.0f&partial=1",
+		lat, lon, offset, radius)
+}
+
 // Nearby serves the nearby departures page.
 func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 	latStr := r.URL.Query().Get("lat")
@@ -23,8 +66,13 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 	partial := r.URL.Query().Get("partial") == "1"
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
+	radius, _ := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
+	if radius <= 0 {
+		radius = radiusTiers[0]
+	}
+
 	data := templates.NearbyData{
-		Page: h.page("Nearby Departures", "/nearby"),
+		Page:  h.page("Nearby Departures", "/nearby"),
 		View:  view,
 		Lat:   latStr,
 		Lon:   lonStr,
@@ -38,28 +86,71 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 		if err1 == nil && err2 == nil {
 			switch view {
 			case "stops":
-				stopViews, err := h.findNearbyStopsView(r, lat, lon)
+				limit := 5
+				stopViews, hasMore, err := h.findNearbyStopsView(r, lat, lon, offset, limit, radius)
 				if err != nil {
 					h.logger.Error("finding nearby stops (stop view)", "error", err)
 				} else {
+					// Auto-advance through empty radius tiers
+					newOffset := offset + len(stopViews)
+					for !hasMore && len(stopViews) == 0 && newOffset > 0 {
+						nextR, ok := nextRadius(radius)
+						if !ok {
+							break
+						}
+						radius = nextR
+						stopViews, hasMore, err = h.findNearbyStopsView(r, lat, lon, newOffset, limit, radius)
+						if err != nil {
+							h.logger.Error("finding nearby stops (stop view)", "error", err)
+							break
+						}
+						newOffset += len(stopViews)
+					}
 					data.StopViews = stopViews
-					data.HasStops = len(stopViews) > 0
+					data.HasStops = len(stopViews) > 0 || offset > 0
+					if hasMore {
+						data.HasMore = true
+						data.MoreURL = buildStopsMoreURL(latStr, lonStr, newOffset, radius)
+					} else if newOffset > 0 {
+						if nextR, ok := nextRadius(radius); ok {
+							data.HasMore = true
+							data.MoreURL = buildStopsMoreURL(latStr, lonStr, newOffset, nextR)
+						}
+					}
 				}
 			default:
 				limit := 5
 				if partial {
 					limit = 10
 				}
-				routes, hasMore, err := h.findNearbyRoutes(r, lat, lon, offset, limit)
+				routes, hasMore, err := h.findNearbyRoutes(r, lat, lon, offset, limit, radius)
 				if err != nil {
 					h.logger.Error("finding nearby routes", "error", err)
 				} else {
+					// Auto-advance through empty radius tiers
+					totalShown := offset + len(routes)
+					for !hasMore && len(routes) == 0 && totalShown > 0 {
+						nextR, ok := nextRadius(radius)
+						if !ok {
+							break
+						}
+						radius = nextR
+						routes, hasMore, err = h.findNearbyRoutes(r, lat, lon, totalShown, limit, radius)
+						if err != nil {
+							h.logger.Error("finding nearby routes", "error", err)
+							break
+						}
+					}
 					data.Routes = routes
-					data.HasStops = len(routes) > 0
-					data.HasMore = hasMore
+					data.HasStops = len(routes) > 0 || offset > 0
 					if hasMore {
-						data.MoreURL = fmt.Sprintf("/nearby?view=routes&lat=%s&lon=%s&offset=%d&partial=1",
-							latStr, lonStr, offset+len(routes))
+						data.HasMore = true
+						data.MoreURL = buildRoutesMoreURL(latStr, lonStr, offset+len(routes), radius)
+					} else if offset+len(routes) > 0 {
+						if nextR, ok := nextRadius(radius); ok {
+							data.HasMore = true
+							data.MoreURL = buildRoutesMoreURL(latStr, lonStr, offset+len(routes), nextR)
+						}
 					}
 				}
 			}
@@ -68,13 +159,22 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if partial {
-		// HTMX "More" request: return just the rows + OOB load-more update
-		moreURL := ""
-		if data.HasMore {
-			moreURL = data.MoreURL
-		}
-		if err := templates.RouteNearbyPartial(data.Routes, data.HasMore, moreURL).Render(r.Context(), w); err != nil {
-			h.logger.Error("rendering route partial", "error", err)
+		if view == "stops" {
+			moreURL := ""
+			if data.HasMore {
+				moreURL = data.MoreURL
+			}
+			if err := templates.StopNearbyPartial(data.StopViews, data.HasMore, moreURL).Render(r.Context(), w); err != nil {
+				h.logger.Error("rendering stop partial", "error", err)
+			}
+		} else {
+			moreURL := ""
+			if data.HasMore {
+				moreURL = data.MoreURL
+			}
+			if err := templates.RouteNearbyPartial(data.Routes, data.HasMore, moreURL).Render(r.Context(), w); err != nil {
+				h.logger.Error("rendering route partial", "error", err)
+			}
 		}
 		return
 	}
@@ -86,19 +186,19 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 // findNearbyRoutes builds the flat route-first nearby view data.
 // It queries a wider area than the stop view, groups departures by route+direction,
 // pairs opposite directions across nearby stops, computes intervals, and paginates.
-func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, limit int) ([]templates.RouteNearbyRow, bool, error) {
+func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, limit int, radiusMeters float64) ([]templates.RouteNearbyRow, bool, error) {
 	ctx := r.Context()
 	now := time.Now()
 
-	const maxRadiusMeters = 3218.0 // 2 miles
 	const companionRadius = 50.0
-	latDeg, lonDeg := geo.BoundingBoxRadius(lat, maxRadiusMeters)
+	dbLimit, displayLimit := dbLimitForRadius(radiusMeters)
+	latDeg, lonDeg := geo.BoundingBoxRadius(lat, radiusMeters)
 	radiusDeg := latDeg
 	if lonDeg > radiusDeg {
 		radiusDeg = lonDeg
 	}
 
-	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, 50)
+	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, dbLimit)
 	if err != nil {
 		return nil, false, fmt.Errorf("query nearby stops: %w", err)
 	}
@@ -111,13 +211,12 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 	var allStops []stopWithDist
 	for i, row := range rows {
 		dist := geo.Haversine(lat, lon, row.StopLat, row.StopLon)
-		if dist <= maxRadiusMeters {
+		if dist <= radiusMeters {
 			allStops = append(allStops, stopWithDist{row: i, distance: dist})
 		}
 	}
 
-	// Take top 20 display stops (wider net than stop view)
-	displayLimit := 20
+	// Take top display stops (scaled by radius)
 	displayStops := allStops
 	if len(displayStops) > displayLimit {
 		displayStops = allStops[:displayLimit]
@@ -290,22 +389,22 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 	return cleaned[offset:end], hasMore, nil
 }
 
-// findNearbyStopsView builds the stop-first view data.
+// findNearbyStopsView builds the stop-first view data with pagination.
 // Each stop shows all routes serving it, with no cross-stop pairing.
-func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64) ([]templates.StopViewData, error) {
+func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset, limit int, radiusMeters float64) ([]templates.StopViewData, bool, error) {
 	ctx := r.Context()
 	now := time.Now()
 
-	const maxRadiusMeters = 3218.0 // 2 miles
-	latDeg, lonDeg := geo.BoundingBoxRadius(lat, maxRadiusMeters)
+	dbLimit, _ := dbLimitForRadius(radiusMeters)
+	latDeg, lonDeg := geo.BoundingBoxRadius(lat, radiusMeters)
 	radiusDeg := latDeg
 	if lonDeg > radiusDeg {
 		radiusDeg = lonDeg
 	}
 
-	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, 50)
+	rows, err := h.db.NearbyStops(ctx, lat, lon, radiusDeg, dbLimit)
 	if err != nil {
-		return nil, fmt.Errorf("query nearby stops: %w", err)
+		return nil, false, fmt.Errorf("query nearby stops: %w", err)
 	}
 
 	// Compute Haversine distances, filter to max radius
@@ -316,25 +415,30 @@ func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64) ([]temp
 	var allStops []stopWithDist
 	for i, row := range rows {
 		dist := geo.Haversine(lat, lon, row.StopLat, row.StopLon)
-		if dist <= maxRadiusMeters {
+		if dist <= radiusMeters {
 			allStops = append(allStops, stopWithDist{row: i, distance: dist})
 		}
 	}
 
-	// Take top 5 stops
-	displayLimit := 5
-	if len(allStops) > displayLimit {
-		allStops = allStops[:displayLimit]
+	// Paginate
+	if offset >= len(allStops) {
+		return nil, false, nil
 	}
+	end := offset + limit
+	hasMore := end < len(allStops)
+	if end > len(allStops) {
+		end = len(allStops)
+	}
+	pageStops := allStops[offset:end]
 
-	// Count stop name occurrences for disambiguation
+	// Count stop name occurrences within the page for disambiguation
 	nameCounts := make(map[string]int)
-	for _, s := range allStops {
+	for _, s := range pageStops {
 		nameCounts[rows[s.row].StopName]++
 	}
 
 	var result []templates.StopViewData
-	for _, s := range allStops {
+	for _, s := range pageStops {
 		row := rows[s.row]
 		rg := h.fetchDeparturesForStopView(ctx, row.StopID, now)
 
@@ -353,7 +457,7 @@ func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64) ([]temp
 		result = append(result, sv)
 	}
 
-	return result, nil
+	return result, hasMore, nil
 }
 
 // formatStopDesc converts GTFS stop_desc to a user-friendly label.

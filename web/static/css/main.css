@@ -710,11 +710,13 @@ h3 {
   border-color: var(--accent);
 }
 
-#load-more .htmx-indicator {
+#load-more .htmx-indicator,
+#load-more-stops .htmx-indicator {
   display: none;
 }
 
-#load-more .htmx-request ~ .htmx-indicator {
+#load-more .htmx-request ~ .htmx-indicator,
+#load-more-stops .htmx-request ~ .htmx-indicator {
   display: block;
   text-align: center;
   margin-top: var(--space-sm);

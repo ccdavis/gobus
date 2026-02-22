@@ -175,7 +175,23 @@ templ NearbyPage(data NearbyData) {
 			<div id="stop-list" aria-live="polite">
 				if data.HasStops {
 					if data.View == "stops" {
-						@NearbyStopsViewList(data.StopViews)
+						<div id="stop-list-items">
+							@NearbyStopsViewList(data.StopViews)
+						</div>
+						<div id="load-more-stops">
+							if data.HasMore {
+								<button
+									class="btn-more"
+									hx-get={ data.MoreURL }
+									hx-target="#stop-list-items"
+									hx-swap="beforeend"
+									hx-indicator="#loading-more-stops"
+								>
+									Show more stops
+								</button>
+								<span id="loading-more-stops" class="htmx-indicator loading">Loading…</span>
+							}
+						</div>
 					} else {
 						<div id="route-list">
 							@RouteNearbyList(data.Routes)
@@ -333,49 +349,75 @@ templ routeRowContent(routeShort string, routeColor string, routeTextColor strin
 // NearbyStopsViewList renders the stop-first view of nearby departures.
 templ NearbyStopsViewList(stops []StopViewData) {
 	for _, stop := range stops {
-		<article class="card" data-testid="stop-card">
-			<div style="display:flex;justify-content:space-between;align-items:baseline">
-				<h3>
-					<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", stop.StopID)) }>{ stop.StopName }</a>
-				</h3>
-				<span class="distance" data-testid="stop-distance">{ stop.Distance }</span>
-			</div>
-			if stop.StopDesc != "" {
-				<p class="stop-desc">{ stop.StopDesc }</p>
-			}
-			if len(stop.RouteGroups) > 0 {
-				<ul role="list" aria-label={ fmt.Sprintf("Routes at %s", stop.StopName) } style="list-style:none;padding:0;margin:0">
-					for _, rg := range stop.RouteGroups {
-						<li class="stop-route-group">
-							<div class="departure-row">
-								<a
-									href={ templ.SafeURL(fmt.Sprintf("/routes/%s", rg.RouteID)) }
-									class="route-badge"
-									style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(rg.RouteColor), routeTextColorOrDefault(rg.RouteTextColor)) }
-									aria-label={ fmt.Sprintf("Route %s", rg.RouteShort) }
-								>
-									{ rg.RouteShort }
-								</a>
-								<div class="departure-details">
-									if rg.DirectionText != "" {
-										<span class="direction-label">{ rg.DirectionText }</span>
+		@stopCard(stop)
+	}
+}
+
+// StopNearbyPartial renders additional stops for the "More" HTMX request.
+templ StopNearbyPartial(stops []StopViewData, hasMore bool, moreURL string) {
+	for _, stop := range stops {
+		@stopCard(stop)
+	}
+	<div id="load-more-stops" hx-swap-oob="true">
+		if hasMore {
+			<button
+				class="btn-more"
+				hx-get={ moreURL }
+				hx-target="#stop-list-items"
+				hx-swap="beforeend"
+				hx-indicator="#loading-more-stops"
+			>
+				Show more stops
+			</button>
+			<span id="loading-more-stops" class="htmx-indicator loading">Loading…</span>
+		}
+	</div>
+}
+
+// stopCard renders a single stop card in the stops-centric view.
+templ stopCard(stop StopViewData) {
+	<article class="card" data-testid="stop-card">
+		<div style="display:flex;justify-content:space-between;align-items:baseline">
+			<h3>
+				<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", stop.StopID)) }>{ stop.StopName }</a>
+			</h3>
+			<span class="distance" data-testid="stop-distance">{ stop.Distance }</span>
+		</div>
+		if stop.StopDesc != "" {
+			<p class="stop-desc">{ stop.StopDesc }</p>
+		}
+		if len(stop.RouteGroups) > 0 {
+			<ul role="list" aria-label={ fmt.Sprintf("Routes at %s", stop.StopName) } style="list-style:none;padding:0;margin:0">
+				for _, rg := range stop.RouteGroups {
+					<li class="stop-route-group">
+						<div class="departure-row">
+							<a
+								href={ templ.SafeURL(fmt.Sprintf("/routes/%s", rg.RouteID)) }
+								class="route-badge"
+								style={ fmt.Sprintf("background:#%s;color:#%s", routeColorOrDefault(rg.RouteColor), routeTextColorOrDefault(rg.RouteTextColor)) }
+								aria-label={ fmt.Sprintf("Route %s", rg.RouteShort) }
+							>
+								{ rg.RouteShort }
+							</a>
+							<div class="departure-details">
+								if rg.DirectionText != "" {
+									<span class="direction-label">{ rg.DirectionText }</span>
+								}
+								<div>{ rg.Headsign }</div>
+								<div class="stop-route-times">
+									for _, t := range rg.Times {
+										@departureTime(t.IsRealtime, t.IsLate, t.Realtime, t.Scheduled, t.MinutesAway)
 									}
-									<div>{ rg.Headsign }</div>
-									<div class="stop-route-times">
-										for _, t := range rg.Times {
-											@departureTime(t.IsRealtime, t.IsLate, t.Realtime, t.Scheduled, t.MinutesAway)
-										}
-									</div>
 								</div>
 							</div>
-						</li>
-					}
-				</ul>
-			} else {
-				<p class="loading">No upcoming departures</p>
-			}
-		</article>
-	}
+						</div>
+					</li>
+				}
+			</ul>
+		} else {
+			<p class="loading">No upcoming departures</p>
+		}
+	</article>
 }
 
 // DepartureRow renders a single departure entry.
