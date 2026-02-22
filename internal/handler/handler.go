@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gobus/internal/config"
 	"gobus/internal/geocode"
@@ -22,6 +23,13 @@ import (
 	"gobus/web"
 )
 
+// cachedLocation stores a user's last reverse-geocoded location.
+type cachedLocation struct {
+	Lat     float64
+	Lon     float64
+	Address string
+}
+
 // Handler holds shared dependencies for all HTTP handlers.
 type Handler struct {
 	db           *storage.DB
@@ -30,8 +38,9 @@ type Handler struct {
 	geo          *geocode.Client
 	cfg          *config.Config
 	logger       *slog.Logger
-	version      string // content hash of static assets, for cache busting
-	cookieSecret []byte // HMAC key for signing session cookies
+	version      string     // content hash of static assets, for cache busting
+	cookieSecret []byte     // HMAC key for signing session cookies
+	locationCache sync.Map  // userID (int64) → *cachedLocation
 }
 
 // New creates a Handler.

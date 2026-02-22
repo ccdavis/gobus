@@ -921,6 +921,32 @@ input[type="search"]:focus {
   font-size: 0.875rem;
 }
 
+.stop-distance {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-left: 0.3em;
+}
+
+.unit-toggle {
+  display: inline-block;
+  padding: 1px 8px;
+  background: var(--bg-card);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 2rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.unit-toggle:hover {
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+}
+
 /* === More button === */
 
 .more-btn {

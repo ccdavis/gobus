@@ -234,8 +234,30 @@
     var currentView = new URLSearchParams(window.location.search).get('view') || 'routes';
     var searchURL = '/search?view=' + encodeURIComponent(currentView);
 
-    // Check if lat/lon already provided (e.g. from saved location or search redirect)
+    // Approximate straight-line distance in meters between two lat/lon points
+    function approxDistMeters(lat1, lon1, lat2, lon2) {
+      var dLat = (lat2 - lat1) * 111320;
+      var dLon = (lon2 - lon1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+      return Math.sqrt(dLat * dLat + dLon * dLon);
+    }
+
+    var params = new URLSearchParams(window.location.search);
+    var hasQuery = params.get('q');
+    var isGeoSource = params.get('src') === 'geo';
+
+    // Helper: ensure src=geo hidden input exists on the form
+    function ensureGeoSrc() {
+      if (!nearbyForm.querySelector('input[name="src"]')) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'src';
+        inp.value = 'geo';
+        nearbyForm.appendChild(inp);
+      }
+    }
+
     if (!(latInput.value && lonInput.value)) {
+      // No coordinates yet — run geolocation and submit
       if ('geolocation' in navigator) {
         if (locationStatus) {
           locationStatus.textContent = 'Finding your location\u2026';
@@ -245,10 +267,10 @@
           function (pos) {
             latInput.value = pos.coords.latitude;
             lonInput.value = pos.coords.longitude;
+            ensureGeoSrc();
             if (locationStatus) {
               locationStatus.textContent = 'Location found.';
             }
-            // Auto-submit the form via HTMX if available
             if (window.htmx) {
               htmx.trigger(nearbyForm, 'submit');
             } else {
@@ -269,12 +291,34 @@
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
         );
       } else {
-        // Geolocation not supported
         if (locationStatus) {
           locationStatus.innerHTML =
             'Location services not available. <a href="' + searchURL + '">Search for a location</a> instead.';
         }
       }
+    } else if (isGeoSource && 'geolocation' in navigator) {
+      // Coordinates came from geolocation (not saved location or search).
+      // Background check: reload only if user moved >25m.
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          var dist = approxDistMeters(
+            parseFloat(latInput.value), parseFloat(lonInput.value),
+            pos.coords.latitude, pos.coords.longitude
+          );
+          if (dist > 25) {
+            latInput.value = pos.coords.latitude;
+            lonInput.value = pos.coords.longitude;
+            ensureGeoSrc();
+            if (window.htmx) {
+              htmx.trigger(nearbyForm, 'submit');
+            } else {
+              nearbyForm.submit();
+            }
+          }
+        },
+        function () { /* ignore — keep current location */ },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+      );
     }
   }
 
@@ -325,6 +369,70 @@
   if (window.matchMedia('(display-mode: standalone)').matches) {
     if (installBanner) installBanner.setAttribute('hidden', '');
   }
+
+  // --- Distance Unit Toggle ---
+  var UNIT_KEY = 'gobus-distance-unit';
+
+  function getDistanceUnit() {
+    try { return localStorage.getItem(UNIT_KEY) || 'metric'; }
+    catch (e) { return 'metric'; }
+  }
+
+  function setDistanceUnit(unit) {
+    try { localStorage.setItem(UNIT_KEY, unit); }
+    catch (e) { /* ignore */ }
+  }
+
+  function formatDistText(meters, unit) {
+    if (unit === 'imperial') {
+      var miles = meters / 1609.344;
+      if (miles < 0.1) {
+        return Math.round(meters * 3.28084) + ' ft';
+      }
+      return miles.toFixed(1) + ' mi';
+    }
+    if (meters < 1000) {
+      return Math.round(meters) + ' m';
+    }
+    return (meters / 1000).toFixed(1) + ' km';
+  }
+
+  function applyDistanceUnit() {
+    var unit = getDistanceUnit();
+    var els = document.querySelectorAll('[data-meters]');
+    for (var i = 0; i < els.length; i++) {
+      var meters = parseFloat(els[i].getAttribute('data-meters'));
+      var walkMeters = parseFloat(els[i].getAttribute('data-walk-meters'));
+      if (isNaN(meters)) continue;
+      if (isNaN(walkMeters)) walkMeters = meters;
+      var walkMin = Math.max(1, Math.round(walkMeters / 80.467));
+      els[i].textContent = formatDistText(meters, unit) + ' (' + walkMin + ' min walk)';
+    }
+    var btn = document.getElementById('unit-toggle');
+    if (btn) {
+      if (unit === 'imperial') {
+        btn.textContent = 'mi';
+        btn.setAttribute('aria-label', 'Distance in miles. Click to switch to meters.');
+      } else {
+        btn.textContent = 'm';
+        btn.setAttribute('aria-label', 'Distance in meters. Click to switch to miles.');
+      }
+    }
+  }
+
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.id === 'unit-toggle') {
+      var unit = getDistanceUnit() === 'metric' ? 'imperial' : 'metric';
+      setDistanceUnit(unit);
+      applyDistanceUnit();
+    }
+  });
+
+  applyDistanceUnit();
+
+  document.addEventListener('htmx:afterSwap', function () {
+    applyDistanceUnit();
+  });
 
   // --- Idle Timeout for SSE ---
   var IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes

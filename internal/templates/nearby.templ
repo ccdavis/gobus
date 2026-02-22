@@ -2,6 +2,7 @@ package templates
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 )
 
@@ -38,6 +39,8 @@ type RouteNearbyRow struct {
 	DirectionID    int
 	StopID         string
 	StopName       string
+	DistanceM      float64 // straight-line distance in meters (for display)
+	WalkDistM      float64 // Manhattan distance in meters (for walk time)
 
 	Scheduled   string
 	Realtime    string
@@ -61,6 +64,8 @@ type RouteNearbyRow struct {
 	AltIsLate        bool
 	AltLaterTimes    []LaterArrival
 	AltInterval      string
+	AltDistanceM     float64
+	AltWalkDistM     float64
 }
 
 // LaterArrival holds a later departure time for a route group.
@@ -74,8 +79,9 @@ type LaterArrival struct {
 type StopViewData struct {
 	StopID      string
 	StopName    string
-	StopDesc    string // Disambiguation label, e.g. "Southbound side"
-	Distance    string
+	StopDesc    string  // Disambiguation label, e.g. "Southbound side"
+	DistanceM   float64 // straight-line distance in meters (for display)
+	WalkDistM   float64 // Manhattan distance in meters (for walk time)
 	RouteGroups []StopRouteGroup
 }
 
@@ -134,10 +140,26 @@ templ NearbyPage(data NearbyData) {
 			<div class="nearby-header">
 				<h2>Nearby Departures</h2>
 				<div class="nearby-header-right">
-					if nearbyLocationLabel(data) != "" {
+					if data.Query == "" && data.Lat != "" {
+						<span
+							class="location-label"
+							role="status"
+							aria-label={ "Current location: " + nearbyLocationLabel(data) }
+							hx-get={ fmt.Sprintf("/api/location-label?lat=%s&lon=%s", data.Lat, data.Lon) }
+							hx-trigger="load"
+							hx-swap="outerHTML"
+						>
+							if nearbyLocationLabel(data) != "" {
+								{ nearbyLocationLabel(data) }
+							}
+						</span>
+					} else if nearbyLocationLabel(data) != "" {
 						<span class="location-label" role="status" aria-label={ "Current location: " + nearbyLocationLabel(data) }>{ nearbyLocationLabel(data) }</span>
 					}
 					<a href={ templ.SafeURL(fmt.Sprintf("/search?view=%s", data.View)) } class="change-location-link" aria-label="Change location">Change</a>
+					if data.Lat != "" {
+						<button id="unit-toggle" class="unit-toggle" type="button" aria-label="Distance in meters. Click to switch to miles.">m</button>
+					}
 				</div>
 			</div>
 			<div id="saved-locations" aria-label="Saved locations" hidden></div>
@@ -259,20 +281,20 @@ templ routeNearbyRow(r RouteNearbyRow) {
 		if r.HasAlt {
 			<div class="direction-group">
 				<div class="direction-primary">
-					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, r.AltDirectionText, r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID))
+					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, r.AltDirectionText, r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID), r.DistanceM, r.WalkDistM)
 				</div>
 				<div class="direction-alt" hidden>
-					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.AltDirectionText, r.DirectionText, r.AltStopName, r.AltScheduled, r.AltRealtime, r.AltMinutesAway, r.AltIsRealtime, r.AltIsLate, r.AltLaterTimes, r.AltInterval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", altStopID(r.AltStopID, r.StopID), r.RouteID, 1-r.DirectionID))
+					@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.AltDirectionText, r.DirectionText, r.AltStopName, r.AltScheduled, r.AltRealtime, r.AltMinutesAway, r.AltIsRealtime, r.AltIsLate, r.AltLaterTimes, r.AltInterval, true, fmt.Sprintf("/stops/%s/route/%s?dir=%d", altStopID(r.AltStopID, r.StopID), r.RouteID, 1-r.DirectionID), r.AltDistanceM, r.AltWalkDistM)
 				</div>
 			</div>
 		} else {
-			@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, "", r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, false, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID))
+			@routeRowContent(r.RouteShort, r.RouteColor, r.RouteTextColor, r.DirectionText, "", r.StopName, r.Scheduled, r.Realtime, r.MinutesAway, r.IsRealtime, r.IsLate, r.LaterTimes, r.Interval, false, fmt.Sprintf("/stops/%s/route/%s?dir=%d", r.StopID, r.RouteID, r.DirectionID), r.DistanceM, r.WalkDistM)
 		}
 	</article>
 }
 
 // routeRowContent renders the inner content of a route row direction.
-templ routeRowContent(routeShort string, routeColor string, routeTextColor string, directionText string, altDirectionText string, stopName string, scheduled string, realtime string, minutesAway int, isRealtime bool, isLate bool, laterTimes []LaterArrival, interval string, hasToggle bool, laterURL string) {
+templ routeRowContent(routeShort string, routeColor string, routeTextColor string, directionText string, altDirectionText string, stopName string, scheduled string, realtime string, minutesAway int, isRealtime bool, isLate bool, laterTimes []LaterArrival, interval string, hasToggle bool, laterURL string, distanceM float64, walkDistM float64) {
 	<div class="route-row-line1">
 		if hasToggle {
 			<button
@@ -343,6 +365,7 @@ templ routeRowContent(routeShort string, routeColor string, routeTextColor strin
 		>
 			Later times &#x2192;
 		</a>
+		<span class="stop-distance" data-meters={ fmt.Sprintf("%.0f", distanceM) } data-walk-meters={ fmt.Sprintf("%.0f", walkDistM) }>{ fmtMetricDist(distanceM) } ({ walkMin(walkDistM) } min walk)</span>
 	</div>
 }
 
@@ -381,7 +404,7 @@ templ stopCard(stop StopViewData) {
 			<h3>
 				<a href={ templ.SafeURL(fmt.Sprintf("/stops/%s", stop.StopID)) }>{ stop.StopName }</a>
 			</h3>
-			<span class="distance" data-testid="stop-distance">{ stop.Distance }</span>
+			<span class="distance" data-meters={ fmt.Sprintf("%.0f", stop.DistanceM) } data-walk-meters={ fmt.Sprintf("%.0f", stop.WalkDistM) } data-testid="stop-distance">{ fmtMetricDist(stop.DistanceM) } ({ walkMin(stop.WalkDistM) } min walk)</span>
 		</div>
 		if stop.StopDesc != "" {
 			<p class="stop-desc">{ stop.StopDesc }</p>
@@ -520,7 +543,7 @@ func nearbyLocationLabel(data NearbyData) string {
 	if data.Query != "" {
 		return data.Query
 	}
-	// For geolocation, use the nearest stop name as a rough indicator
+	// Fallback: nearest stop name
 	if len(data.Routes) > 0 {
 		return data.Routes[0].StopName
 	}
@@ -558,6 +581,23 @@ func nearbyTabURL(view, lat, lon, query string) string {
 		u += "&q=" + url.QueryEscape(query)
 	}
 	return u
+}
+
+// fmtMetricDist formats meters as a metric distance string.
+func fmtMetricDist(meters float64) string {
+	if meters < 1000 {
+		return fmt.Sprintf("%d m", int(meters))
+	}
+	return fmt.Sprintf("%.1f km", meters/1000)
+}
+
+// walkMin returns the estimated walk time in minutes at 3 mph (80.467 m/min).
+func walkMin(meters float64) string {
+	min := int(math.Ceil(meters / 80.467))
+	if min < 1 {
+		min = 1
+	}
+	return fmt.Sprintf("%d", min)
 }
 
 func routeColorOrDefault(c string) string {

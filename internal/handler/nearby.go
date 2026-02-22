@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"strings"
@@ -300,6 +302,8 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 			DirectionID:    dep.DirectionID,
 			StopID:         g.stopID,
 			StopName:       g.stopName,
+			DistanceM:      geo.Haversine(lat, lon, g.stopLat, g.stopLon),
+			WalkDistM:      geo.ManhattanDistance(lat, lon, g.stopLat, g.stopLon),
 			Scheduled:      dep.Scheduled,
 			Realtime:       dep.Realtime,
 			MinutesAway:    dep.MinutesAway,
@@ -361,6 +365,8 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 			allRoutes[pi].AltIsLate = allRoutes[ai].IsLate
 			allRoutes[pi].AltLaterTimes = allRoutes[ai].LaterTimes
 			allRoutes[pi].AltInterval = allRoutes[ai].Interval
+			allRoutes[pi].AltDistanceM = allRoutes[ai].DistanceM
+			allRoutes[pi].AltWalkDistM = allRoutes[ai].WalkDistM
 			// Mark alt for removal
 			allRoutes[ai].RouteID = "" // sentinel for removal
 			break
@@ -438,7 +444,8 @@ func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset,
 		sv := templates.StopViewData{
 			StopID:      row.StopID,
 			StopName:    row.StopName,
-			Distance:    formatDistance(s.distance),
+			DistanceM:   s.distance,
+			WalkDistM:   geo.ManhattanDistance(lat, lon, row.StopLat, row.StopLon),
 			RouteGroups: rg,
 		}
 
@@ -476,11 +483,55 @@ func formatStopDesc(desc string) string {
 	}
 }
 
-func formatDistance(meters float64) string {
-	if meters < 1000 {
-		return fmt.Sprintf("%d m", int(meters))
+// LocationLabel handles async reverse geocoding for the nearby page location label.
+// Returns an HTML span with the street address, or 204 if unavailable.
+// Caches the result per user — skips the Nominatim call if the user hasn't moved >25m.
+func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
+	latStr := r.URL.Query().Get("lat")
+	lonStr := r.URL.Query().Get("lon")
+	lat, err1 := strconv.ParseFloat(latStr, 64)
+	lon, err2 := strconv.ParseFloat(lonStr, 64)
+	if err1 != nil || err2 != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
-	miles := geo.MetersToMiles(meters)
-	return fmt.Sprintf("%.1f mi", miles)
+
+	// Identify user from session cookie for caching
+	userID := int64(0)
+	if cookie, err := r.Cookie(cookieName); err == nil {
+		userID = h.verifyCookie(cookie.Value)
+	}
+
+	// Check cache: if user hasn't moved >25m, return cached address
+	if userID > 0 {
+		if cached, ok := h.locationCache.Load(userID); ok {
+			cl := cached.(*cachedLocation)
+			if geo.Haversine(lat, lon, cl.Lat, cl.Lon) < 25 {
+				h.renderLocationLabel(w, cl.Address)
+				return
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	addr, err := h.geo.Reverse(ctx, lat, lon)
+	if err != nil || addr == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Cache the result for this user
+	if userID > 0 {
+		h.locationCache.Store(userID, &cachedLocation{Lat: lat, Lon: lon, Address: addr})
+	}
+
+	h.renderLocationLabel(w, addr)
 }
 
+func (h *Handler) renderLocationLabel(w http.ResponseWriter, addr string) {
+	escaped := html.EscapeString(addr)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<span class="location-label" role="status" aria-label="Current location: %s">%s</span>`, escaped, escaped)
+}

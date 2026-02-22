@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -87,4 +88,60 @@ func (c *Client) Search(ctx context.Context, query string) (*Result, error) {
 		Lon:         lon,
 		DisplayName: results[0].DisplayName,
 	}, nil
+}
+
+// Reverse performs reverse geocoding: lat/lon → nearest address.
+// Returns a short address string (house number + road), or the full
+// display name if those fields are missing.
+func (c *Client) Reverse(ctx context.Context, lat, lon float64) (string, error) {
+	u := "https://nominatim.openstreetmap.org/reverse?" + url.Values{
+		"lat":            {strconv.FormatFloat(lat, 'f', 6, 64)},
+		"lon":            {strconv.FormatFloat(lon, 'f', 6, 64)},
+		"format":         {"jsonv2"},
+		"zoom":           {"18"}, // street-level
+		"addressdetails": {"1"},
+	}.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("nominatim reverse: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("nominatim reverse status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		DisplayName string `json:"display_name"`
+		Address     struct {
+			HouseNumber string `json:"house_number"`
+			Road        string `json:"road"`
+		} `json:"address"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("nominatim reverse decode: %w", err)
+	}
+
+	// Build a short address: "123 Main St"
+	if result.Address.Road != "" {
+		if result.Address.HouseNumber != "" {
+			return result.Address.HouseNumber + " " + result.Address.Road, nil
+		}
+		return result.Address.Road, nil
+	}
+	// Fallback to first part of display name (before first comma)
+	if result.DisplayName != "" {
+		if i := strings.Index(result.DisplayName, ","); i > 0 {
+			return result.DisplayName[:i], nil
+		}
+		return result.DisplayName, nil
+	}
+	return "", fmt.Errorf("no address found")
 }

@@ -89,6 +89,61 @@ func TestBoundingBoxRadius(t *testing.T) {
 	}
 }
 
+func TestManhattanDistance(t *testing.T) {
+	tests := []struct {
+		name                   string
+		lat1, lon1, lat2, lon2 float64
+		wantMeters             float64
+		tolerance              float64
+	}{
+		{
+			name:       "same point returns zero",
+			lat1:       44.9778, lon1: -93.2650,
+			lat2:       44.9778, lon2: -93.2650,
+			wantMeters: 0,
+			tolerance:  0.001,
+		},
+		{
+			name:       "one block north (~200m) in Minneapolis",
+			lat1:       44.97780, lon1: -93.26500,
+			lat2:       44.97960, lon2: -93.26500,
+			wantMeters: 200,
+			tolerance:  5,
+		},
+		{
+			name:       "diagonal should be greater than Haversine",
+			lat1:       44.9778, lon1: -93.2650,
+			lat2:       44.9800, lon2: -93.2630,
+			wantMeters: 0, // just check > Haversine
+			tolerance:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ManhattanDistance(tt.lat1, tt.lon1, tt.lat2, tt.lon2)
+			if tt.name == "diagonal should be greater than Haversine" {
+				hav := Haversine(tt.lat1, tt.lon1, tt.lat2, tt.lon2)
+				if got <= hav {
+					t.Errorf("ManhattanDistance() = %.1f should be > Haversine() = %.1f", got, hav)
+				}
+				return
+			}
+			if math.Abs(got-tt.wantMeters) > tt.tolerance {
+				t.Errorf("ManhattanDistance() = %.1f m, want %.1f m (±%.0f)", got, tt.wantMeters, tt.tolerance)
+			}
+		})
+	}
+}
+
+func TestManhattanDistance_Symmetry(t *testing.T) {
+	a := ManhattanDistance(44.9778, -93.2650, 44.9537, -93.0900)
+	b := ManhattanDistance(44.9537, -93.0900, 44.9778, -93.2650)
+	if a != b {
+		t.Errorf("ManhattanDistance not symmetric: %f != %f", a, b)
+	}
+}
+
 func TestMetersToMiles(t *testing.T) {
 	tests := []struct {
 		meters float64

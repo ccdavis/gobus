@@ -23,6 +23,16 @@ func BoundingBoxRadius(lat, radiusMeters float64) (latDeg, lonDeg float64) {
 	return latDeg, lonDeg
 }
 
+// ManhattanDistance returns the city-block walking distance in meters
+// between two lat/lon points (|N-S| + |E-W|). Better approximates actual
+// walking distance on a street grid than straight-line Haversine.
+func ManhattanDistance(lat1, lon1, lat2, lon2 float64) float64 {
+	nsMeters := math.Abs(lat2-lat1) * (math.Pi / 180) * earthRadiusMeters
+	avgLat := toRad((lat1 + lat2) / 2)
+	ewMeters := math.Abs(lon2-lon1) * (math.Pi / 180) * earthRadiusMeters * math.Cos(avgLat)
+	return nsMeters + ewMeters
+}
+
 // MetersToMiles converts meters to miles.
 func MetersToMiles(m float64) float64 {
 	return m / 1609.344

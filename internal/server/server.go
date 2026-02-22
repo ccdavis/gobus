@@ -61,6 +61,9 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 	mux.HandleFunc("GET /stops/{id}", h.StopDetail)
 	mux.HandleFunc("GET /stops/{stopID}/route/{routeID}", h.LaterArrivals)
 
+	// API
+	mux.HandleFunc("GET /api/location-label", h.LocationLabel)
+
 	// SSE
 	mux.HandleFunc("GET /sse/departures/{id}", h.SSEDepartures)
 

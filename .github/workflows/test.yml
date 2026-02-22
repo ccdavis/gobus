@@ -17,10 +17,13 @@ jobs:
           go-version: '1.24'
 
       - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.977
 
       - name: Generate templ files
-        run: templ generate
+        run: |
+          templ generate
+          # Verify generation produced output — templ can silently skip files
+          test -f internal/templates/nearby_templ.go || { echo "templ generate produced no output"; exit 1; }
 
       - name: Run tests
         run: CGO_ENABLED=1 go test -race ./...
