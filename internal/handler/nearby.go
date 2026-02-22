@@ -12,7 +12,7 @@ import (
 )
 
 // radiusTiers defines the progressive search radii in meters.
-var radiusTiers = []float64{800, 1600, 3200, 6400, 12800}
+var radiusTiers = []float64{400, 800, 1600, 3200, 6400, 12800}
 
 // nextRadius returns the next radius tier above the given radius.
 // Returns 0, false if already at or above the maximum.
@@ -29,6 +29,8 @@ func nextRadius(current float64) (float64, bool) {
 // for a given search radius.
 func dbLimitForRadius(radiusMeters float64) (dbLimit, displayLimit int) {
 	switch {
+	case radiusMeters <= 400:
+		return 10, 5
 	case radiusMeters <= 800:
 		return 20, 10
 	case radiusMeters <= 1600:
