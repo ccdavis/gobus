@@ -271,11 +271,7 @@
             if (locationStatus) {
               locationStatus.textContent = 'Location found.';
             }
-            if (window.htmx) {
-              htmx.trigger(nearbyForm, 'submit');
-            } else {
-              nearbyForm.submit();
-            }
+            nearbyForm.submit();
           },
           function (err) {
             if (locationStatus) {
@@ -309,11 +305,7 @@
             latInput.value = pos.coords.latitude;
             lonInput.value = pos.coords.longitude;
             ensureGeoSrc();
-            if (window.htmx) {
-              htmx.trigger(nearbyForm, 'submit');
-            } else {
-              nearbyForm.submit();
-            }
+            nearbyForm.submit();
           }
         },
         function () { /* ignore — keep current location */ },
