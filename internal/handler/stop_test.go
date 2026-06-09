@@ -59,6 +59,45 @@ func TestMinutesUntil(t *testing.T) {
 	}
 }
 
+// TestMinutesUntil_DST pins the daylight-saving behavior that the old
+// "midnight + duration" math got wrong (the schedules-off-by-an-hour bug seen
+// on the March transition). Anchored to America/Chicago so it's deterministic
+// regardless of the host's local zone.
+func TestMinutesUntil_DST(t *testing.T) {
+	central, err := time.LoadLocation("America/Chicago")
+	if err != nil {
+		t.Skip("America/Chicago tzdata unavailable")
+	}
+
+	// Spring forward 2025: 2:00 AM CST jumps to 3:00 AM CDT on March 9. After
+	// the jump, the old code reported these an hour too high (e.g. 120 not 60).
+	spring := time.Date(2025, 3, 9, 14, 0, 0, 0, central) // 2:00 PM CDT
+	for _, tt := range []struct {
+		gtfsTime string
+		want     int
+	}{
+		{"14:30:00", 30},
+		{"15:00:00", 60},
+		{"23:00:00", 540}, // 9 hours later, same day
+	} {
+		if got := minutesUntil(tt.gtfsTime, spring); got != tt.want {
+			t.Errorf("spring-forward minutesUntil(%q) = %d, want %d", tt.gtfsTime, got, tt.want)
+		}
+	}
+
+	// Fall back 2025: 2:00 AM CDT returns to 1:00 AM CST on November 2.
+	fall := time.Date(2025, 11, 2, 14, 0, 0, 0, central) // 2:00 PM CST
+	if got := minutesUntil("15:00:00", fall); got != 60 {
+		t.Errorf("fall-back minutesUntil(15:00) = %d, want 60", got)
+	}
+
+	// After-midnight GTFS time (24:30) resolves to 12:30 AM the next day.
+	eve := time.Date(2025, 3, 8, 23, 50, 0, 0, central)
+	if got := minutesUntil("24:30:00", eve); got != 40 {
+		t.Errorf("after-midnight minutesUntil(24:30) = %d, want 40", got)
+	}
+}
+
 func TestExpandDirectionText(t *testing.T) {
 	tests := []struct {
 		input, want string

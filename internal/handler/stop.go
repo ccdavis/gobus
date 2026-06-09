@@ -86,15 +86,25 @@ func formatGTFSTime(gtfsTime string) string {
 	return fmt.Sprintf("%d:%02d %s", displayHour, m, period)
 }
 
-// minutesUntil calculates minutes from now until a GTFS time on the current day.
-func minutesUntil(gtfsTime string, now time.Time) int {
+// gtfsInstant converts a GTFS "HH:MM:SS" departure time (which may exceed
+// 24:00:00 for trips after midnight) into the absolute instant it represents on
+// now's service date, in now's location.
+//
+// It builds a wall-clock time via time.Date so the correct zone offset —
+// including daylight saving — is applied for that moment. Computing it as
+// "midnight + duration" is wrong across a DST transition: on the spring-forward
+// day a duration spanning the 2 AM jump lands an hour late, which scrambles
+// minutes-away, departure sorting, and late detection. (Bug observed in March.)
+func gtfsInstant(gtfsTime string, now time.Time) time.Time {
 	var h, m, s int
 	fmt.Sscanf(gtfsTime, "%d:%d:%d", &h, &m, &s)
+	y, mo, d := now.Date()
+	return time.Date(y, mo, d+h/24, h%24, m, s, 0, now.Location())
+}
 
-	depTime := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	depTime = depTime.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second)
-
-	diff := depTime.Sub(now)
+// minutesUntil calculates minutes from now until a GTFS time on the current day.
+func minutesUntil(gtfsTime string, now time.Time) int {
+	diff := gtfsInstant(gtfsTime, now).Sub(now)
 	if diff < 0 {
 		return 0
 	}

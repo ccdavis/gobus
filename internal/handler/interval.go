@@ -95,12 +95,10 @@ func (h *Handler) detectInterval(ctx context.Context, stopID, routeID string, di
 	return fmt.Sprintf("Every %d min until %s", rounded, endTime.Format("3:04 PM"))
 }
 
-// parseGTFSTime converts "HH:MM:SS" (possibly >24) to a time.Time on the given day.
+// parseGTFSTime converts "HH:MM:SS" (possibly >24h) to the absolute instant it
+// represents on now's service date. See gtfsInstant for the DST handling.
 func parseGTFSTime(gtfsTime string, now time.Time) time.Time {
-	var h, m, s int
-	fmt.Sscanf(gtfsTime, "%d:%d:%d", &h, &m, &s)
-	t := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	return t.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second)
+	return gtfsInstant(gtfsTime, now)
 }
 
 func abs(x int) int {
