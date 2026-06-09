@@ -49,4 +49,5 @@ e2e/*.png
 
 # Build
 /dist/
+/build/
 /tmp/
