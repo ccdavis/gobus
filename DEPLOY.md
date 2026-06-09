@@ -1,4 +1,13 @@
-# GoBus Deployment Guide
+# GoBus Build & Run Guide
+
+GoBus is a **local-first, single-user** app: the Go core runs on your own device
+and you reach it from a local browser (desktop build) or, on iPhone, from an
+in-app `WKWebView` over the same core (see [`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md)).
+There is no public server to deploy and no login.
+
+> **Note:** Earlier versions documented a multi-user public deployment to Fly.io.
+> That model has been retired — GoBus no longer has user accounts, cookies, or a
+> hosted server. This guide now covers building and running the local binary.
 
 ## Building from source
 
@@ -47,13 +56,16 @@ CGO_ENABLED=1 go build -o gobus ./cmd/gobus/
 ./gobus --help
 ```
 
-For **ARM servers** (e.g., Raspberry Pi), replace the Go download URL:
+For **ARM machines** (e.g., Raspberry Pi), replace the Go download URL:
 
 ```bash
 curl -fsSL https://go.dev/dl/go1.24.0.linux-arm64.tar.gz | sudo tar -C /usr/local -xzf -
 ```
 
 ### Manual setup — macOS
+
+macOS is also where the native iPhone build happens (gomobile + Xcode require
+macOS); see [`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md).
 
 ```bash
 # 1. Install Xcode command line tools (provides C compiler)
@@ -76,307 +88,51 @@ templ generate
 CGO_ENABLED=1 go build -o gobus ./cmd/gobus/
 ```
 
-### Running the binary
+## Running the binary
 
-The binary is self-contained — static assets are embedded. Just copy it
-to the server and run:
+The binary is self-contained — static assets are embedded. By default it binds
+to `127.0.0.1` (local-only) and no login is required:
 
 ```bash
-# Copy to server
-scp gobus you@server:~/gobus
-
-# On the server
-./gobus                          # starts on :8080, auto-downloads GTFS
+./gobus                          # starts on http://127.0.0.1:8080
 ./gobus -port 3000               # custom port
+./gobus -host 0.0.0.0            # expose on the LAN (e.g. to test from a phone)
 GOBUS_DB_PATH=/data/gobus.db ./gobus   # custom database location
 ```
 
-On first run it downloads ~24 MB of GTFS data and imports it (~30 seconds).
-The cookie secret is auto-generated and saved to `.cookie_secret` next to
-the database.
+On first run it downloads ~24 MB of GTFS data and imports it (~30 seconds),
+showing a loading page that auto-refreshes until the data is ready. User
+settings (saved locations, units) are stored in the SQLite database file.
 
-### Cross-compiling
+To skip the on-device download, point `GOBUS_DB_PATH` at a prebuilt database
+(produced by `./gobus --import-gtfs`); the app serves immediately when data is
+already present.
 
-To build on macOS for a Linux server:
+## Cross-compiling
+
+To build on one machine for another (e.g. on macOS for a Linux box):
 
 ```bash
-# For x86_64 Linux servers
+# For x86_64 Linux
 GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-linux-gnu-gcc go build -o gobus-linux ./cmd/gobus/
 
-# For ARM Linux servers (Raspberry Pi)
+# For ARM Linux (Raspberry Pi)
 GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -o gobus-linux-arm64 ./cmd/gobus/
 ```
 
-Cross-compiling with CGo requires a cross-compiler (`brew install FiloSottile/musl-cross/musl-cross`).
-The easiest alternative: build directly on the target machine, or use Docker
-(the Dockerfile handles all build dependencies).
+Cross-compiling with CGo requires a cross-compiler
+(`brew install FiloSottile/musl-cross/musl-cross`). The easiest alternative is
+to build directly on the target machine.
 
----
-
-# Deploying to Fly.io
-
-Step-by-step guide to deploy GoBus as a public site with a custom domain.
-Fly.io builds the Docker image remotely, so you don't need build tools
-locally — just `flyctl`.
-
-## Prerequisites
-
-- A Fly.io account (free at [fly.io/app/sign-up](https://fly.io/app/sign-up))
-- A credit card on file (required by Fly.io, but the free tier covers this app)
-
-## 1. Install flyctl
+## Inspecting the database
 
 ```bash
-# macOS
-brew install flyctl
-
-# Linux
-curl -L https://fly.io/install.sh | sh
-
-# Windows
-powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+sqlite3 gobus.db "SELECT COUNT(*) FROM stops;"
+sqlite3 gobus.db "SELECT route_id, route_long_name FROM routes LIMIT 10;"
 ```
 
-Then authenticate:
+## Force a GTFS re-import
 
 ```bash
-fly auth login
+./gobus --import-gtfs    # re-download the feed and rebuild, then exit
 ```
-
-## 2. Launch the app
-
-From the project root:
-
-```bash
-fly launch
-```
-
-This will detect the `Dockerfile` and prompt you with questions:
-
-- **App name**: Pick something like `gobus` or `gobus-transit`
-- **Region**: Pick the closest to Minneapolis — `ord` (Chicago) is a good choice
-- **Database**: Say **no** (we use SQLite, not Postgres)
-- **Redis**: Say **no**
-- **Deploy now**: Say **no** (we need to set up the volume first)
-
-This creates a `fly.toml` file. Edit it to make sure it has these settings:
-
-```toml
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 0
-
-[mounts]
-  source = "gobus_data"
-  destination = "/data"
-```
-
-The `[mounts]` section is critical — it connects a persistent volume to `/data`
-where SQLite and GTFS files live. Without this, your data disappears on every
-deploy.
-
-## 3. Create a persistent volume
-
-```bash
-fly volumes create gobus_data --region ord --size 1
-```
-
-This creates a 1 GB persistent disk in Chicago. Adjust the region to match
-what you chose in step 2. The free tier includes 1 GB of volume storage.
-
-## 4. Set the cookie secret
-
-Generate a random secret and set it as an environment variable:
-
-```bash
-# Generate a random 32-byte hex secret
-fly secrets set GOBUS_COOKIE_SECRET=$(openssl rand -hex 32)
-```
-
-This ensures user sessions survive app restarts. Without it, the app
-generates a random secret on each start and all users get logged out.
-
-You can also set other config if you want non-default values:
-
-```bash
-fly secrets set GOBUS_MAX_USERS=50           # default: 100
-fly secrets set GOBUS_MAX_DEVICES_RECENT=3   # default: 3
-```
-
-## 5. Deploy
-
-```bash
-fly deploy
-```
-
-This builds the Docker image remotely on Fly.io's builders, pushes it, and
-starts the app. First deploy takes 2-3 minutes (subsequent deploys are
-faster due to layer caching).
-
-Watch the logs to verify startup:
-
-```bash
-fly logs
-```
-
-You should see:
-
-```
-asset version computed version=abc123de
-no GOBUS_COOKIE_SECRET set — ...    # only if you skipped step 4
-server starting addr=:8080
-```
-
-Your app is now live at `https://your-app-name.fly.dev`
-
-## 6. Set up a custom domain
-
-### Option A: Register a new domain through a registrar
-
-Buy a domain from any registrar (Namecheap, Cloudflare, Google Domains, etc.).
-
-### Option B: Use a domain you already own
-
-You can add a subdomain like `bus.yourdomain.com`.
-
-### Point the domain at Fly.io
-
-1. Tell Fly.io about your domain:
-
-```bash
-fly certs add bus.yourdomain.com
-```
-
-2. Fly.io will show you the DNS records to create. Typically:
-
-```
-CNAME  bus.yourdomain.com  →  your-app-name.fly.dev
-```
-
-Or for a root domain (no subdomain):
-
-```
-A      yourdomain.com  →  <Fly.io IPv4 address>
-AAAA   yourdomain.com  →  <Fly.io IPv6 address>
-```
-
-3. Add these records in your domain registrar's DNS settings.
-
-4. Wait for DNS propagation (usually 5-30 minutes). Check status:
-
-```bash
-fly certs show bus.yourdomain.com
-```
-
-Once it shows `Ready`, Fly.io has automatically provisioned a Let's Encrypt
-SSL certificate. Your site is live at `https://bus.yourdomain.com`.
-
-## 7. First-time data setup
-
-On first startup, GoBus automatically downloads the Metro Transit GTFS feed
-(~24 MB) and imports it into SQLite. This takes about 30 seconds. During
-this time, visitors see a "Please wait, downloading route data..." loading
-page that auto-refreshes every 5 seconds. Once the import finishes, the
-next refresh lands on the login page.
-
-The GTFS data is stored on the persistent volume, so it survives deploys.
-GoBus automatically checks for GTFS updates daily.
-
-## 8. Register your first user
-
-1. Visit `https://your-app-name.fly.dev`
-2. You'll be redirected to the login page
-3. Click "Register"
-4. Pick a username (3-30 chars) and passphrase (8+ chars)
-5. You're in! The app will ask for location permission to show nearby stops.
-
-## Ongoing operations
-
-### Redeploy after code changes
-
-```bash
-fly deploy
-```
-
-### View logs
-
-```bash
-fly logs            # stream live logs
-fly logs --app gobus  # if you have multiple apps
-```
-
-### SSH into the running machine
-
-```bash
-fly ssh console
-```
-
-Useful for inspecting the database:
-
-```bash
-sqlite3 /data/gobus.db "SELECT COUNT(*) FROM users;"
-sqlite3 /data/gobus.db "SELECT username, created_at FROM users;"
-```
-
-### Scale (if needed)
-
-The free tier runs 1 shared CPU VM. If you need more:
-
-```bash
-fly scale vm shared-cpu-2x    # double CPU/RAM
-fly scale count 1              # stay at 1 instance (SQLite can't do multi-instance)
-```
-
-**Important:** Do NOT scale to multiple instances. SQLite does not support
-concurrent writes from multiple processes. Always keep `count=1`.
-
-### Force GTFS re-import
-
-```bash
-fly ssh console -C "gobus --import-gtfs"
-```
-
-### Backup the database
-
-```bash
-fly ssh sftp get /data/gobus.db ./gobus-backup.db
-```
-
-## Cost
-
-Fly.io's free tier includes:
-- 3 shared-cpu-1x VMs (you use 1)
-- 256 MB RAM per VM
-- 3 GB persistent volume storage (you use 1 GB)
-- Unlimited bandwidth (within reason)
-- Auto-SSL certificates
-- Custom domains
-
-For a transit app with <100 users, this costs **$0/month**.
-
-If you exceed the free tier, the smallest paid plan is ~$1.94/month.
-
-## Troubleshooting
-
-### "Error: No volumes found"
-You forgot step 3. Create the volume before deploying.
-
-### App starts but immediately stops
-Check `fly logs`. Common causes:
-- Missing `GOBUS_COOKIE_SECRET` (warning, not fatal)
-- Can't create database file (volume not mounted — check `fly.toml` mounts)
-
-### "502 Bad Gateway" after deploy
-The app might still be importing GTFS data. Wait 30 seconds and try again.
-Check `fly logs` to see import progress.
-
-### Custom domain shows certificate error
-DNS hasn't propagated yet. Run `fly certs show yourdomain.com` to check
-status. It can take up to 30 minutes.
-
-### Users getting logged out after deploy
-You didn't set `GOBUS_COOKIE_SECRET`. Without it, a new random secret is
-generated on each restart. Set it with `fly secrets set` (step 4).

@@ -1,12 +1,14 @@
 # GoBus
 
-Accessible real-time transit app for Metro Transit (Minneapolis/St. Paul). Built as a PWA with a Go backend, designed for screen reader users and anyone who wants a fast, clean departure board.
+Accessible real-time transit app for Metro Transit (Minneapolis/St. Paul), designed for screen reader users and anyone who wants a fast, clean departure board.
 
-This is a PWA (Progressive web application,) basically a web page that your phone can put on its app menu and treat it like it is a real app. For iPhone you need to open initially with Safari and add to home screen; Android will give you the option even more easily.
+GoBus is **local-first and single-user**: the Go core runs on your own device and
+you reach it from a local browser (desktop build) or from inside a native iPhone
+app (in progress — a `WKWebView` over the same Go core, packaged via gomobile; see
+[`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md)). There is **no login and no server to
+sign up for** — all your settings live in the app's local SQLite database.
 
-As a user you must register with a user name and pass-phrase, but no email or phone number is required. Registration is simply a way to keep your preferences separate from other users and to limit bots singing up. Once you register and sign in, your browser remembers your login unless you don't open the app for more than thirty days.
-
-I "built" this app completely with Claude Code / Opus 4.6. It was a means to an end: I wanted a more friendly bus and train schedule app. I could do it by hand in Rust or C++ or Python but I think it would have taken several weeks at least. This took me three evenings.
+I "built" this app completely with Claude Code / Opus. It was a means to an end: I wanted a more friendly bus and train schedule app. I could do it by hand in Rust or C++ or Python but I think it would have taken several weeks at least.
 
 ## Features
 
@@ -15,13 +17,13 @@ I "built" this app completely with Claude Code / Opus 4.6. It was a means to an 
 - **Stop detail** — live-updating departures via SSE, service alerts, interval detection ("Every 15 min until 9:00 PM")
 - **Service alerts** — full-text GTFS-RT alerts and NexTrip alerts on affected stops and routes
 - **Saved locations** — save frequently used stops as "Home", "Work", etc. for one-tap access
-- **PWA** — installable on mobile, works offline with cached pages, dark mode default
+- **Local-first** — runs entirely on-device, dark mode default, no account required
 
-Directions  from this poihnt on are for developers and for hosting the app, not running it as a end user.
+Directions from this point on are for developers building/running the app from source.
 
 ## Build Requirements
 
-- **Go 1.22+** with CGo enabled (for SQLite)
+- **Go 1.24+** with CGo enabled (for SQLite)
 - **GCC** or another C compiler (required by `mattn/go-sqlite3`)
 - **[templ](https://templ.guide/)** CLI — install with `go install github.com/a-h/templ/cmd/templ@latest`
 
@@ -55,6 +57,7 @@ All settings are via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `GOBUS_HOST` | `127.0.0.1` | Bind address (local-only; set `0.0.0.0` for LAN) |
 | `GOBUS_PORT` | `8080` | HTTP server port |
 | `GOBUS_DB_PATH` | `./gobus.db` | SQLite database path |
 | `GOBUS_GTFS_DIR` | `./data` | Directory for GTFS zip downloads |
@@ -64,6 +67,7 @@ All settings are via environment variables:
 ### CLI flags
 
 ```bash
+./gobus --host 0.0.0.0     # Bind on the LAN (default 127.0.0.1, local-only)
 ./gobus --port 3000        # Override port
 ./gobus --import-gtfs      # Download GTFS and exit
 ./gobus --test-mode        # Use test configuration
