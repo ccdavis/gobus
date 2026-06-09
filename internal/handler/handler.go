@@ -2,16 +2,12 @@ package handler
 
 import (
 	"crypto/md5"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"gobus/internal/config"
@@ -23,7 +19,7 @@ import (
 	"gobus/web"
 )
 
-// cachedLocation stores a user's last reverse-geocoded location.
+// cachedLocation stores the device's last reverse-geocoded location.
 type cachedLocation struct {
 	Lat     float64
 	Lon     float64
@@ -32,15 +28,14 @@ type cachedLocation struct {
 
 // Handler holds shared dependencies for all HTTP handlers.
 type Handler struct {
-	db           *storage.DB
-	nt           *nextrip.Client
-	rt           *realtime.Store
-	geo          *geocode.Client
-	cfg          *config.Config
-	logger       *slog.Logger
-	version      string     // content hash of static assets, for cache busting
-	cookieSecret []byte     // HMAC key for signing session cookies
-	locationCache sync.Map  // userID (int64) → *cachedLocation
+	db            *storage.DB
+	nt            *nextrip.Client
+	rt            *realtime.Store
+	geo           *geocode.Client
+	cfg           *config.Config
+	logger        *slog.Logger
+	version       string   // content hash of static assets, for cache busting
+	locationCache sync.Map // locationCacheKey → *cachedLocation (single user per device)
 }
 
 // New creates a Handler.
@@ -48,10 +43,7 @@ func New(db *storage.DB, nt *nextrip.Client, rt *realtime.Store, geo *geocode.Cl
 	v := computeAssetVersion(web.StaticFiles)
 	logger.Info("asset version computed", "version", v)
 
-	// Derive cookie secret: env var > file on disk > generate and save
-	secret := loadOrCreateSecret(cfg, logger)
-
-	return &Handler{db: db, nt: nt, rt: rt, geo: geo, cfg: cfg, logger: logger, version: v, cookieSecret: secret}
+	return &Handler{db: db, nt: nt, rt: rt, geo: geo, cfg: cfg, logger: logger, version: v}
 }
 
 // computeAssetVersion hashes all CSS and JS files in the embedded static FS
@@ -94,38 +86,3 @@ func (h *Handler) page(title, currentPath string) templates.Page {
 	}
 }
 
-// loadOrCreateSecret resolves the cookie secret with this priority:
-//  1. GOBUS_COOKIE_SECRET env var (for Fly.io / production)
-//  2. .cookie_secret file next to the database (auto-persisted)
-//  3. Generate random secret, write it to the file for next time
-func loadOrCreateSecret(cfg *config.Config, logger *slog.Logger) []byte {
-	// 1. Explicit env var takes priority
-	if cfg.CookieSecret != "" {
-		return []byte(cfg.CookieSecret)
-	}
-
-	// 2. Try reading from file next to the database
-	secretPath := filepath.Join(filepath.Dir(cfg.DBPath), ".cookie_secret")
-	if data, err := os.ReadFile(secretPath); err == nil {
-		s := strings.TrimSpace(string(data))
-		if decoded, err := hex.DecodeString(s); err == nil && len(decoded) >= 16 {
-			logger.Info("cookie secret loaded from file", "path", secretPath)
-			return decoded
-		}
-	}
-
-	// 3. Generate and save
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		logger.Error("failed to generate cookie secret", "error", err)
-		os.Exit(1)
-	}
-	if err := os.MkdirAll(filepath.Dir(secretPath), 0700); err == nil {
-		if err := os.WriteFile(secretPath, []byte(hex.EncodeToString(secret)+"\n"), 0600); err == nil {
-			logger.Info("cookie secret generated and saved", "path", secretPath)
-		} else {
-			logger.Warn("could not save cookie secret to file — sessions won't survive restart", "error", err)
-		}
-	}
-	return secret
-}

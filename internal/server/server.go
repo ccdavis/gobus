@@ -18,12 +18,11 @@ import (
 
 // Server is the HTTP server for GoBus.
 type Server struct {
-	mux          *http.ServeMux
-	cfg          *config.Config
-	logger       *slog.Logger
-	db           *storage.DB
-	cookieSecret []byte
-	ready        chan struct{} // closed when GTFS data is available
+	mux    *http.ServeMux
+	cfg    *config.Config
+	logger *slog.Logger
+	db     *storage.DB
+	ready  chan struct{} // closed when GTFS data is available
 }
 
 // New creates a new Server with all routes registered.
@@ -38,19 +37,12 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 		close(ready)
 	}
 
-	s := &Server{mux: mux, cfg: cfg, logger: logger, db: db, cookieSecret: h.CookieSecret(), ready: ready}
+	s := &Server{mux: mux, cfg: cfg, logger: logger, db: db, ready: ready}
 
 	// Static files — served from embedded FS, versioned URLs get immutable caching
 	staticFS, _ := fs.Sub(web.StaticFiles, "static")
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticCacheHandler(fileServer)))
-
-	// Auth
-	mux.HandleFunc("GET /login", h.Login)
-	mux.HandleFunc("POST /login", h.Login)
-	mux.HandleFunc("GET /register", h.Register)
-	mux.HandleFunc("POST /register", h.Register)
-	mux.HandleFunc("POST /logout", h.Logout)
 
 	// Pages
 	mux.HandleFunc("GET /", h.Home)
@@ -89,5 +81,5 @@ func (s *Server) SetReady() {
 func (s *Server) ListenAndServe() error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.logger.Info("server starting", "addr", addr)
-	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger, s.cookieSecret, s.db, s.ready))
+	return http.ListenAndServe(addr, withMiddleware(s.mux, s.logger, s.ready))
 }

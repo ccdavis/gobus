@@ -13,6 +13,10 @@ import (
 	"gobus/internal/templates"
 )
 
+// locationCacheKey is the single key under which the device's last
+// reverse-geocoded location is cached (one user per device, no auth).
+const locationCacheKey = "device"
+
 // radiusTiers defines the progressive search half-sides in meters.
 // Each tier represents a square box with side = 2 * radius.
 // Tuned for Minneapolis grid: ~201m N-S blocks, ~101m E-W blocks.
@@ -496,20 +500,12 @@ func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Identify user from session cookie for caching
-	userID := int64(0)
-	if cookie, err := r.Cookie(cookieName); err == nil {
-		userID = h.verifyCookie(cookie.Value)
-	}
-
-	// Check cache: if user hasn't moved >25m, return cached address
-	if userID > 0 {
-		if cached, ok := h.locationCache.Load(userID); ok {
-			cl := cached.(*cachedLocation)
-			if geo.Haversine(lat, lon, cl.Lat, cl.Lon) < 25 {
-				h.renderLocationLabel(w, cl.Address)
-				return
-			}
+	// Check cache: if the device hasn't moved >25m, return cached address
+	if cached, ok := h.locationCache.Load(locationCacheKey); ok {
+		cl := cached.(*cachedLocation)
+		if geo.Haversine(lat, lon, cl.Lat, cl.Lon) < 25 {
+			h.renderLocationLabel(w, cl.Address)
+			return
 		}
 	}
 
@@ -522,10 +518,8 @@ func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cache the result for this user
-	if userID > 0 {
-		h.locationCache.Store(userID, &cachedLocation{Lat: lat, Lon: lon, Address: addr})
-	}
+	// Cache the result for this device
+	h.locationCache.Store(locationCacheKey, &cachedLocation{Lat: lat, Lon: lon, Address: addr})
 
 	h.renderLocationLabel(w, addr)
 }

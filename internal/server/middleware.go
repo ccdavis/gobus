@@ -5,13 +5,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"gobus/internal/handler"
-	"gobus/internal/storage"
 )
 
-func withMiddleware(h http.Handler, logger *slog.Logger, cookieSecret []byte, db *storage.DB, ready <-chan struct{}) http.Handler {
-	return securityHeaders(requestLogger(waitForData(requireAuth(h, cookieSecret, db), ready), logger))
+func withMiddleware(h http.Handler, logger *slog.Logger, ready <-chan struct{}) http.Handler {
+	return securityHeaders(requestLogger(waitForData(h, ready), logger))
 }
 
 // waitForData shows a loading page while GTFS data is being downloaded.
@@ -26,11 +23,10 @@ func waitForData(next http.Handler, ready <-chan struct{}) http.Handler {
 		default:
 		}
 
-		// Allow static assets, PWA files, and auth pages through while loading
+		// Allow static assets and PWA files through while loading
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/static/") || p == "/sw.js" ||
-			p == "/manifest.json" || p == "/offline" ||
-			p == "/login" || p == "/register" {
+			p == "/manifest.json" || p == "/offline" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -88,42 +84,6 @@ const loadingPage = `<!DOCTYPE html>
 </div>
 </body>
 </html>`
-
-// requireAuth redirects unauthenticated requests to /login.
-// Public paths are whitelisted and pass through without auth.
-// On authenticated requests, updates the device session last_seen time.
-func requireAuth(next http.Handler, secret []byte, db *storage.DB) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
-
-		// Public paths — no auth required
-		if p == "/login" || p == "/register" || p == "/offline" ||
-			p == "/sw.js" || p == "/manifest.json" ||
-			strings.HasPrefix(p, "/static/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Check session cookie
-		cookie, err := r.Cookie("gobus_session")
-		if err != nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-		userID := handler.VerifyCookie(cookie.Value, secret)
-		if userID == 0 {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-
-		// Update device session last_seen (best-effort, don't block on error)
-		if deviceCookie, err := r.Cookie("gobus_device"); err == nil && deviceCookie.Value != "" {
-			db.UpsertDeviceSession(r.Context(), int64(userID), deviceCookie.Value)
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
 
 func requestLogger(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
