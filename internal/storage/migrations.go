@@ -126,4 +126,19 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_trips_service ON trips(service_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trips_route_direction ON trips(route_id, direction_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_calendar_dates_date ON calendar_dates(date)`,
+
+	// User settings (single-user, local-first). These tables are NOT cleared by
+	// the GTFS importer, so they survive schedule re-imports.
+	`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS saved_locations (
+		stop_id    TEXT PRIMARY KEY,
+		name       TEXT NOT NULL,
+		label      TEXT NOT NULL,
+		lat        REAL NOT NULL,
+		lon        REAL NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
 }

@@ -16,46 +16,65 @@
     }
   }
 
-  // --- Saved Locations ---
-  var STORAGE_KEY = 'gobus-saved-locations';
+  // --- Saved Locations (persisted in the local SQLite DB via /api/saved) ---
+  // Loaded once into an in-memory cache; mutations hit the API then update it.
+  var LEGACY_STORAGE_KEY = 'gobus-saved-locations'; // migrated once, then removed
+  var savedLocations = [];
 
   function getSavedLocations() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* ignore */ }
-    return [];
+    return savedLocations;
   }
 
-  function saveSavedLocations(locs) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(locs));
-    } catch (e) { /* ignore */ }
+  function apiGetSaved() {
+    return fetch('/api/saved', { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .catch(function () { return []; });
+  }
+
+  function apiAddSaved(loc) {
+    return fetch('/api/saved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(loc).toString()
+    });
   }
 
   function addSavedLocation(loc) {
-    var locs = getSavedLocations();
     // Don't duplicate by stopID
-    for (var i = 0; i < locs.length; i++) {
-      if (locs[i].stopID === loc.stopID) return false;
+    for (var i = 0; i < savedLocations.length; i++) {
+      if (savedLocations[i].stopID === loc.stopID) return Promise.resolve(false);
     }
-    locs.push(loc);
-    saveSavedLocations(locs);
-    return true;
+    return apiAddSaved(loc).then(function (r) {
+      if (r && r.ok) { savedLocations.push(loc); return true; }
+      return false;
+    }).catch(function () { return false; });
   }
 
   function removeSavedLocation(stopID) {
-    var locs = getSavedLocations();
-    locs = locs.filter(function (l) { return l.stopID !== stopID; });
-    saveSavedLocations(locs);
+    return fetch('/api/saved/' + encodeURIComponent(stopID), { method: 'DELETE' })
+      .then(function () {
+        savedLocations = savedLocations.filter(function (l) { return l.stopID !== stopID; });
+      }).catch(function () { /* ignore */ });
   }
 
   function isSaved(stopID) {
-    var locs = getSavedLocations();
-    for (var i = 0; i < locs.length; i++) {
-      if (locs[i].stopID === stopID) return true;
+    for (var i = 0; i < savedLocations.length; i++) {
+      if (savedLocations[i].stopID === stopID) return true;
     }
     return false;
+  }
+
+  // One-time migration of any locations left in localStorage into the DB.
+  function migrateLegacySaved() {
+    if (savedLocations.length) return;
+    var raw;
+    try { raw = localStorage.getItem(LEGACY_STORAGE_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var legacy;
+    try { legacy = JSON.parse(raw); } catch (e) { return; }
+    if (!legacy || !legacy.length) return;
+    legacy.forEach(function (loc) { apiAddSaved(loc); savedLocations.push(loc); });
+    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* ignore */ }
   }
 
   // Render saved location buttons on the nearby page
@@ -145,15 +164,19 @@
     if (e.target && e.target.classList.contains('remove-saved-btn')) {
       var stopID = e.target.getAttribute('data-stop-id');
       if (stopID) {
-        removeSavedLocation(stopID);
-        showManageSaved();
+        removeSavedLocation(stopID).then(showManageSaved);
       }
       return;
     }
   });
 
-  // Render saved locations on nearby page load
-  renderSavedLocations();
+  // Load saved locations from the DB, then render and sync the save button.
+  apiGetSaved().then(function (list) {
+    savedLocations = Array.isArray(list) ? list : [];
+    migrateLegacySaved();
+    renderSavedLocations();
+    updateSaveStopButton();
+  });
 
   // --- Direction Toggle ---
   // Works for both route-nearby-row clicks and direction-toggle button clicks
@@ -189,22 +212,30 @@
   });
 
   // --- Save Stop Button (on stop detail page) ---
+  // Reflects current saved state from the cache; re-queried so the async
+  // initial load can call it once the saved list arrives.
+  function updateSaveStopButton() {
+    var btn = document.getElementById('save-stop-btn');
+    if (!btn) return;
+    var sid = btn.getAttribute('data-stop-id');
+    var sname = btn.getAttribute('data-stop-name');
+    if (isSaved(sid)) {
+      btn.textContent = 'Saved';
+      btn.setAttribute('aria-label', sname + ' is saved');
+    } else {
+      btn.textContent = 'Save stop';
+      btn.setAttribute('aria-label', 'Save ' + sname + ' to your locations');
+    }
+  }
+
   var saveStopBtn = document.getElementById('save-stop-btn');
   if (saveStopBtn) {
     var stopID = saveStopBtn.getAttribute('data-stop-id');
     var stopName = saveStopBtn.getAttribute('data-stop-name');
 
-    // Update button state based on whether already saved
-    if (isSaved(stopID)) {
-      saveStopBtn.textContent = 'Saved';
-      saveStopBtn.setAttribute('aria-label', stopName + ' is saved');
-    }
-
     saveStopBtn.addEventListener('click', function () {
       if (isSaved(stopID)) {
-        removeSavedLocation(stopID);
-        saveStopBtn.textContent = 'Save stop';
-        saveStopBtn.setAttribute('aria-label', 'Save ' + stopName + ' to your locations');
+        removeSavedLocation(stopID).then(updateSaveStopButton);
       } else {
         // Prompt for a short label
         var label = prompt('Give this location a short name (e.g. "Home", "Work"):', stopName);
@@ -217,9 +248,7 @@
           label: label.trim(),
           lat: saveStopBtn.getAttribute('data-stop-lat'),
           lon: saveStopBtn.getAttribute('data-stop-lon')
-        });
-        saveStopBtn.textContent = 'Saved';
-        saveStopBtn.setAttribute('aria-label', stopName + ' is saved');
+        }).then(updateSaveStopButton);
       }
     });
   }
@@ -362,17 +391,20 @@
     if (installBanner) installBanner.setAttribute('hidden', '');
   }
 
-  // --- Distance Unit Toggle ---
-  var UNIT_KEY = 'gobus-distance-unit';
-
+  // --- Distance Unit Toggle (persisted in the local SQLite DB) ---
+  // The server renders the current unit into <html data-unit="…">, so there's
+  // no flash and no localStorage; toggling persists via /api/settings/unit.
   function getDistanceUnit() {
-    try { return localStorage.getItem(UNIT_KEY) || 'metric'; }
-    catch (e) { return 'metric'; }
+    return document.documentElement.getAttribute('data-unit') === 'imperial' ? 'imperial' : 'metric';
   }
 
   function setDistanceUnit(unit) {
-    try { localStorage.setItem(UNIT_KEY, unit); }
-    catch (e) { /* ignore */ }
+    document.documentElement.setAttribute('data-unit', unit);
+    fetch('/api/settings/unit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'unit=' + encodeURIComponent(unit)
+    }).catch(function () { /* ignore */ });
   }
 
   function formatDistText(meters, unit) {

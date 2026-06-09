@@ -5,12 +5,13 @@ type Page struct {
 	Title        string
 	CurrentPath  string // For nav highlighting
 	AssetVersion string // Content hash for cache-busting static assets
+	DistanceUnit string // "metric" or "imperial" — read by app.js from data-unit
 }
 
 // Layout renders the full HTML page shell with accessible landmarks.
 templ Layout(page Page) {
 	<!DOCTYPE html>
-	<html lang="en">
+	<html lang="en" data-unit={ page.DistanceUnit }>
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>

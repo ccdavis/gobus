@@ -57,6 +57,10 @@ func New(cfg *config.Config, db *storage.DB, nt *nextrip.Client, rt *realtime.St
 
 	// API
 	mux.HandleFunc("GET /api/location-label", h.LocationLabel)
+	mux.HandleFunc("GET /api/saved", h.SavedList)
+	mux.HandleFunc("POST /api/saved", h.SavedAdd)
+	mux.HandleFunc("DELETE /api/saved/{stopID}", h.SavedRemove)
+	mux.HandleFunc("POST /api/settings/unit", h.UnitSet)
 
 	// SSE
 	mux.HandleFunc("GET /sse/departures/{id}", h.SSEDepartures)

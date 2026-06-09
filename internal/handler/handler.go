@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"io"
@@ -77,12 +78,19 @@ func computeAssetVersion(staticFS fs.FS) string {
 	return fmt.Sprintf("%x", h.Sum(nil))[:8]
 }
 
-// page creates a templates.Page with the asset version pre-filled.
+// page creates a templates.Page with the asset version and distance-unit
+// preference pre-filled. The unit is read from the local settings table so the
+// page renders with the user's choice (no localStorage, no flash).
 func (h *Handler) page(title, currentPath string) templates.Page {
+	unit := defaultDistanceUnit
+	if v, ok, err := h.db.GetSetting(context.Background(), settingDistanceUnit); err == nil && ok && (v == "metric" || v == "imperial") {
+		unit = v
+	}
 	return templates.Page{
 		Title:        title,
 		CurrentPath:  currentPath,
 		AssetVersion: h.version,
+		DistanceUnit: unit,
 	}
 }
 
