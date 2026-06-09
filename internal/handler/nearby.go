@@ -199,7 +199,7 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 // pairs opposite directions across nearby stops, computes intervals, and paginates.
 func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, limit int, halfSide float64) ([]templates.RouteNearbyRow, bool, error) {
 	ctx := r.Context()
-	now := time.Now()
+	now := agencyNow()
 
 	const companionRadius = 50.0
 	dbLimit, displayLimit := dbLimitForRadius(halfSide)
@@ -402,7 +402,7 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 // Each stop shows all routes serving it, with no cross-stop pairing.
 func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset, limit int, halfSide float64) ([]templates.StopViewData, bool, error) {
 	ctx := r.Context()
-	now := time.Now()
+	now := agencyNow()
 
 	dbLimit, _ := dbLimitForRadius(halfSide)
 	latDeg, lonDeg := geo.BoundingBoxRadius(lat, halfSide)

@@ -13,7 +13,7 @@ import (
 func (h *Handler) StopDetail(w http.ResponseWriter, r *http.Request) {
 	stopID := r.PathValue("id")
 	ctx := r.Context()
-	now := time.Now()
+	now := agencyNow()
 
 	// Get stop info
 	var stopName, stopCode string

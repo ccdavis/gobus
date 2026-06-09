@@ -46,7 +46,7 @@ func (h *Handler) SSEDepartures(w http.ResponseWriter, r *http.Request) {
 
 // sendDepartureEvent renders the departure list as HTML and sends it as an SSE event.
 func (h *Handler) sendDepartureEvent(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, stopID string) {
-	now := time.Now()
+	now := agencyNow()
 	departures := h.fetchDepartures(ctx, stopID, now, 15)
 
 	var buf bytes.Buffer

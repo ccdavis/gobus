@@ -3,7 +3,6 @@ package handler
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"gobus/internal/templates"
 )
@@ -45,7 +44,7 @@ func (h *Handler) RouteList(w http.ResponseWriter, r *http.Request) {
 // RouteDetail serves the detail page for a single route.
 func (h *Handler) RouteDetail(w http.ResponseWriter, r *http.Request) {
 	routeID := r.PathValue("id")
-	now := time.Now()
+	now := agencyNow()
 
 	// Get route info
 	routes, err := h.db.AllRoutes(r.Context())

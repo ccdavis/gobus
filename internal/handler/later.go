@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"gobus/internal/templates"
 )
@@ -16,7 +15,7 @@ func (h *Handler) LaterArrivals(w http.ResponseWriter, r *http.Request) {
 	routeID := r.PathValue("routeID")
 	directionID, _ := strconv.Atoi(r.URL.Query().Get("dir"))
 	ctx := r.Context()
-	now := time.Now()
+	now := agencyNow()
 
 	// Get stop info
 	var stopName string
