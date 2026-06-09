@@ -25,6 +25,7 @@ func main() {
 
 	// CLI flags
 	importOnly := flag.Bool("import-gtfs", false, "Download and import GTFS data, then exit")
+	flag.StringVar(&cfg.Host, "host", cfg.Host, "Bind address (127.0.0.1 = local-only, 0.0.0.0 = LAN)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 	flag.BoolVar(&cfg.TestMode, "test-mode", cfg.TestMode, "Enable test mode (fixture data, mock APIs)")
 	flag.StringVar(&cfg.GTFSDir, "gtfs-dir", cfg.GTFSDir, "Directory for GTFS data files")

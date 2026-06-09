@@ -7,6 +7,7 @@ import (
 
 // Config holds application configuration from environment variables.
 type Config struct {
+	Host           string // bind address; 127.0.0.1 = local-only, 0.0.0.0 = LAN
 	Port           int
 	DBPath         string
 	GTFSDir        string
@@ -19,6 +20,7 @@ type Config struct {
 // Load reads configuration from environment variables with defaults.
 func Load() *Config {
 	return &Config{
+		Host:           envStr("GOBUS_HOST", "127.0.0.1"),
 		Port:           envInt("GOBUS_PORT", 8080),
 		DBPath:         envStr("GOBUS_DB_PATH", "./gobus.db"),
 		GTFSDir:        envStr("GOBUS_GTFS_DIR", "./data"),
