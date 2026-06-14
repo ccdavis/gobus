@@ -1,4 +1,7 @@
-.PHONY: build dev generate test test-e2e test-all clean import-gtfs prebuilt-db ios-framework
+.PHONY: build dev generate test test-e2e test-all clean import-gtfs prebuilt-db ios-framework ios-app ios-run
+
+# iOS Simulator device used by the ios-run target.
+IOS_SIM ?= iPhone 16 Pro
 
 # CGo is required for mattn/go-sqlite3
 export CGO_ENABLED := 1
@@ -43,8 +46,25 @@ prebuilt-db: build
 # See NATIVE_APP_PLAN.md Phase 2. (Will not run on Linux/WSL2.)
 ios-framework:
 	mkdir -p build
-	gomobile bind -target=ios -o build/Gobus.xcframework ./mobile
-	@echo "Built build/Gobus.xcframework"
+	gomobile bind -target=ios -o build/GobusKit.xcframework ./mobile
+	@echo "Built build/GobusKit.xcframework"
+
+# Generate the Xcode project and build the app for the iOS Simulator.
+# Requires xcodegen + full Xcode. Inputs: ios-framework + prebuilt-db.
+ios-app: ios-framework prebuilt-db
+	cd ios && xcodegen generate
+	cd ios && xcodebuild -project Gobus.xcodeproj -scheme Gobus \
+		-sdk iphonesimulator -configuration Debug \
+		-destination 'platform=iOS Simulator,name=$(IOS_SIM)' \
+		-derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build
+	@echo "Built ios/build/dd/Build/Products/Debug-iphonesimulator/Gobus.app"
+
+# Boot the simulator, install, and launch the app.
+ios-run: ios-app
+	xcrun simctl boot '$(IOS_SIM)' || true
+	open -a Simulator
+	xcrun simctl install '$(IOS_SIM)' ios/build/dd/Build/Products/Debug-iphonesimulator/Gobus.app
+	xcrun simctl launch --console-pty '$(IOS_SIM)' com.gobus.app
 
 # Clean build artifacts
 clean:

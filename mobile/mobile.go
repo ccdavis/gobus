@@ -8,10 +8,11 @@
 //
 // Build (on macOS, with gomobile + Xcode — see NATIVE_APP_PLAN.md Phase 2):
 //
-//	gomobile bind -target=ios -o build/Gobus.xcframework ./mobile
+//	gomobile bind -target=ios -o build/GobusKit.xcframework ./mobile
 //
-// gomobile prefixes the exported names with the package, so from Swift these
-// are MobileStart(...) and MobileStop().
+// gomobile prefixes the exported names with the package, so from Swift (after
+// `import GobusKit`) these are MobileStart(...) and MobileStop(). The framework
+// module is named GobusKit to avoid colliding with the Gobus app target.
 package mobile
 
 import (
