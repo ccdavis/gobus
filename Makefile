@@ -43,7 +43,7 @@ prebuilt-db: build
 # Build the iOS xcframework from the mobile package.
 # Requires macOS + Xcode + gomobile:
 #   go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init
-# See NATIVE_APP_PLAN.md Phase 2. (Will not run on Linux/WSL2.)
+# See ios/README.md. (Will not run on Linux/WSL2.)
 ios-framework:
 	mkdir -p build
 	gomobile bind -target=ios -o build/GobusKit.xcframework ./mobile

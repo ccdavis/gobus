@@ -6,7 +6,7 @@
 // down. The Swift shell calls Start on launch, then points a WKWebView at
 // http://127.0.0.1:<port>/.
 //
-// Build (on macOS, with gomobile + Xcode — see NATIVE_APP_PLAN.md Phase 2):
+// Build (on macOS, with gomobile + Xcode — see ios/README.md):
 //
 //	gomobile bind -target=ios -o build/GobusKit.xcframework ./mobile
 //

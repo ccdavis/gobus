@@ -2,7 +2,7 @@
 
 A thin SwiftUI shell that runs the shared Go core on-device and points a
 `WKWebView` at the local server (`http://127.0.0.1:<port>`). See
-`../NATIVE_APP_PLAN.md` for the overall design.
+`../NATIVE_APP_TODO.md` for status and remaining work.
 
 ## What's here (checked in)
 

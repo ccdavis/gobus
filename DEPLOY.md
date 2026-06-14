@@ -2,7 +2,7 @@
 
 GoBus is a **local-first, single-user** app: the Go core runs on your own device
 and you reach it from a local browser (desktop build) or, on iPhone, from an
-in-app `WKWebView` over the same core (see [`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md)).
+in-app `WKWebView` over the same core (see [`NATIVE_APP_TODO.md`](NATIVE_APP_TODO.md)).
 There is no public server to deploy and no login.
 
 > **Note:** Earlier versions documented a multi-user public deployment to Fly.io.
@@ -65,7 +65,7 @@ curl -fsSL https://go.dev/dl/go1.24.0.linux-arm64.tar.gz | sudo tar -C /usr/loca
 ### Manual setup — macOS
 
 macOS is also where the native iPhone build happens (gomobile + Xcode require
-macOS); see [`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md).
+macOS); see [`ios/README.md`](ios/README.md).
 
 ```bash
 # 1. Install Xcode command line tools (provides C compiler)

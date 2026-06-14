@@ -3,8 +3,9 @@
 Accessible Metro Transit (Twin Cities) transit app. **Local-first, single-user:**
 the Go core runs on-device and is hit by a local browser (desktop build) or an
 in-app `WKWebView` (native iPhone build, via gomobile). No login; all user
-settings live in the local SQLite file. See `NATIVE_APP_PLAN.md` for the native
-app effort (branch `phone-app`).
+settings live in the local SQLite file. The native iPhone app lives in `ios/`
+(see `ios/README.md`); `NATIVE_APP_TODO.md` tracks remaining work (branch
+`phone-app`).
 
 ## Tech Stack
 
@@ -40,7 +41,8 @@ make import-gtfs # Force GTFS re-download and import
 - `internal/templates/` — templ components
 - `web/static/` — CSS, JS, icons
 - `e2e/` — Playwright test suite (Node.js project)
-- `mobile/` — gomobile bind entry point (`Start`/`Stop`), wraps the server core *(planned, see NATIVE_APP_PLAN.md)*
+- `mobile/` — gomobile bind entry point (`Start`/`Stop`), wraps the server core
+- `ios/` — SwiftUI `WKWebView` shell (XcodeGen `project.yml`); see `ios/README.md`
 
 ## Architecture Notes
 

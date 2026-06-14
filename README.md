@@ -4,8 +4,9 @@ Accessible real-time transit app for Metro Transit (Minneapolis/St. Paul), desig
 
 GoBus is **local-first and single-user**: the Go core runs on your own device and
 you reach it from a local browser (desktop build) or from inside a native iPhone
-app (in progress — a `WKWebView` over the same Go core, packaged via gomobile; see
-[`NATIVE_APP_PLAN.md`](NATIVE_APP_PLAN.md)). There is **no login and no server to
+app (a `WKWebView` over the same Go core, packaged via gomobile; see
+[`ios/README.md`](ios/README.md) to build it and
+[`NATIVE_APP_TODO.md`](NATIVE_APP_TODO.md) for remaining work). There is **no login and no server to
 sign up for** — all your settings live in the app's local SQLite database.
 
 I "built" this app completely with Claude Code / Opus. It was a means to an end: I wanted a more friendly bus and train schedule app. I could do it by hand in Rust or C++ or Python but I think it would have taken several weeks at least.
