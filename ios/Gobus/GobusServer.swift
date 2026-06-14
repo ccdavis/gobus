@@ -30,17 +30,25 @@ enum GobusServer {
 
         // First-launch DB copy: the app bundle is read-only and SQLite's WAL
         // needs a writable directory, so copy the prebuilt DB out of the bundle.
+        // This happens once and is never overwritten — gobus.db also holds user
+        // settings (saved locations, unit preference), so a re-copy on app update
+        // would wipe them; schedule data is kept current by the background GTFS
+        // refresh instead. Copy via a temp path + rename so an interrupted copy
+        // can't leave a half-written file we'd later mistake for a valid DB.
         let dbURL = dir.appendingPathComponent("gobus.db")
         if !fm.fileExists(atPath: dbURL.path) {
-            if let bundled = Bundle.main.url(forResource: "gobus", withExtension: "db") {
-                do {
-                    try fm.copyItem(at: bundled, to: dbURL)
-                } catch {
-                    NSLog("GoBus: failed to copy bundled DB: \(error)")
-                    return 0
-                }
-            } else {
+            guard let bundled = Bundle.main.url(forResource: "gobus", withExtension: "db") else {
                 NSLog("GoBus: bundled gobus.db not found in app bundle")
+                return 0
+            }
+            let tmpURL = dir.appendingPathComponent("gobus.db.copying")
+            try? fm.removeItem(at: tmpURL)
+            do {
+                try fm.copyItem(at: bundled, to: tmpURL)
+                try fm.moveItem(at: tmpURL, to: dbURL)
+            } catch {
+                try? fm.removeItem(at: tmpURL)
+                NSLog("GoBus: failed to copy bundled DB: \(error)")
                 return 0
             }
         }

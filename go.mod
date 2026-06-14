@@ -1,6 +1,6 @@
 module gobus
 
-go 1.25.0
+go 1.24.0
 
 require (
 	github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs v1.0.0

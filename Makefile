@@ -50,8 +50,10 @@ ios-framework:
 	@echo "Built build/GobusKit.xcframework"
 
 # Generate the Xcode project and build the app for the iOS Simulator.
-# Requires xcodegen + full Xcode. Inputs: ios-framework + prebuilt-db.
-ios-app: ios-framework prebuilt-db
+# Requires xcodegen + full Xcode. Builds the prebuilt DB only if missing
+# (prebuilt-db force-reimports GTFS, which is slow); delete dist/gobus.db to refresh.
+ios-app: ios-framework
+	@test -f dist/gobus.db || $(MAKE) prebuilt-db
 	cd ios && xcodegen generate
 	cd ios && xcodebuild -project Gobus.xcodeproj -scheme Gobus \
 		-sdk iphonesimulator -configuration Debug \
