@@ -64,6 +64,45 @@ xcrun simctl location "iPhone 16 Pro" set 44.9778,-93.2650   # downtown Minneapo
 
 ## Running on a real device
 
-Requires an Apple Developer account for signing/provisioning. In `project.yml`
-set `DEVELOPMENT_TEAM` (and a unique `PRODUCT_BUNDLE_IDENTIFIER`), regenerate,
-then build with `-destination 'generic/platform=iOS'` and code signing enabled.
+A **free Apple ID is enough** for testing on your own iPhone — you do *not* need
+the paid ($99/yr) Apple Developer Program. The paid account is only required for
+TestFlight / App Store distribution. With a free "personal team" the only
+limitations are a **7-day** provisioning expiry (just rebuild + reinstall) and no
+distribution to other devices.
+
+Signing is already wired up in `project.yml` (`CODE_SIGN_STYLE: Automatic` +
+`DEVELOPMENT_TEAM: KKLTANHU6N`, with a unique `PRODUCT_BUNDLE_IDENTIFIER` of
+`com.colindavis.gobus`). To run on a physical device:
+
+```bash
+# From repo root: build the framework + DB if you haven't (see above).
+cd ios && xcodegen generate
+
+# Find your device's UDID:
+xcrun xctrace list devices        # look under "== Devices ==" (not Simulators)
+
+# Build + sign for the device (-allowProvisioningUpdates auto-creates the cert
+# + profile on first run). NOTE: codesign needs your *unlocked login keychain*,
+# which is only available in your own interactive shell — not in a detached/
+# sandboxed session. If signing fails with `errSecInternalComponent`, run this
+# command in Terminal.app yourself rather than via an automated runner.
+xcodebuild -project Gobus.xcodeproj -scheme Gobus \
+  -sdk iphoneos -configuration Debug \
+  -destination 'id=<YOUR-UDID>' \
+  -derivedDataPath build/dd -allowProvisioningUpdates build
+
+# Install onto the device (uses device pairing, not the keychain):
+xcrun devicectl device install app --device <YOUR-UDID> \
+  build/dd/Build/Products/Debug-iphoneos/Gobus.app
+```
+
+First-time-only device setup:
+
+- **Developer Mode** (iOS 16+): Settings → Privacy & Security → Developer Mode →
+  on → reboot → confirm. The toggle only appears *after* a device build has been
+  attempted at least once.
+- **Trust the cert**: after install, Settings → General → VPN & Device Management
+  → your Apple Development cert → **Trust**, before the app will launch.
+
+The full, blow-by-blow account of getting this working the first time (including
+the VoiceOver and keychain gotchas) lives in `../docs/ios-device-deploy-playbook.md`.

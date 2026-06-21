@@ -29,6 +29,13 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Gobus/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.gobus.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.colindavis.gobus
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Device builds: auto-provision with the free personal team. The Team ID
+        # is baked in so signing survives `xcodegen generate` and works headless
+        # from the command line (xcodebuild -allowProvisioningUpdates creates the
+        # cert + profile). Simulator builds pass CODE_SIGNING_ALLOWED=NO and
+        # ignore this.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KKLTANHU6N

@@ -17,13 +17,18 @@ left (Phase 4 + polish).
 
 ## Remaining
 
-### Ship on a real device (blocks device testing + distribution)
-- [ ] Apple Developer account ($99/yr).
-- [ ] Set `DEVELOPMENT_TEAM` and a unique `PRODUCT_BUNDLE_IDENTIFIER` in
-      `ios/project.yml`; regenerate and build with code signing for
-      `-destination 'generic/platform=iOS'`.
-- [ ] Run on a physical iPhone; confirm CoreLocation + nearby departures on
-      device (not just Simulator).
+### Ship on a real device
+- [x] Run on a physical iPhone for QA. Done with a **free** Apple ID / personal
+      team — the paid program is *not* needed for own-device testing. Signing is
+      wired into `ios/project.yml` (`CODE_SIGN_STYLE: Automatic`,
+      `DEVELOPMENT_TEAM: KKLTANHU6N`, bundle id `com.colindavis.gobus`). Build +
+      install steps in `ios/README.md`; first-run war story (Developer Mode,
+      keychain session, VoiceOver gotchas) in
+      `docs/ios-device-deploy-playbook.md`.
+- [ ] Confirm CoreLocation + nearby departures from real GPS on device (in
+      progress — verifying during the VoiceOver QA pass).
+- [ ] Apple Developer Program ($99/yr) — still required for TestFlight / App
+      Store distribution (see "App Store prep" below).
 
 ### App polish
 - [ ] App icon (asset catalog `AppIcon`, referenced by
