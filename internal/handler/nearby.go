@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -101,9 +102,10 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					h.logger.Error("finding nearby stops (stop view)", "error", err)
 				} else {
-					// Auto-advance through empty radius tiers
+					// Auto-advance through empty radius tiers (including the
+					// initial search, where offset is still zero)
 					newOffset := offset + len(stopViews)
-					for !hasMore && len(stopViews) == 0 && newOffset > 0 {
+					for !hasMore && len(stopViews) == 0 {
 						nextR, ok := nextRadius(radius)
 						if !ok {
 							break
@@ -137,9 +139,10 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					h.logger.Error("finding nearby routes", "error", err)
 				} else {
-					// Auto-advance through empty radius tiers
+					// Auto-advance through empty radius tiers (including the
+					// initial search, where offset is still zero)
 					newOffset := offset + len(routes)
-					for !hasMore && len(routes) == 0 && newOffset > 0 {
+					for !hasMore && len(routes) == 0 {
 						nextR, ok := nextRadius(radius)
 						if !ok {
 							break
@@ -249,10 +252,14 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 		}
 	}
 
-	// Fetch raw departures for all stops, build route groups
+	// Fetch raw departures for all stops (bounded concurrency), then build
+	// route groups. A group is keyed by route+direction+headsign so distinct
+	// branches of the same route stay separate rows, and it is represented by
+	// the nearest stop serving it (stops are iterated nearest-first).
 	type routeKey struct {
 		routeID     string
 		directionID int
+		headsign    string
 	}
 	type routeGroup struct {
 		deps     []templates.DepartureInfo
@@ -265,13 +272,20 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 	var order []routeKey
 
 	fetchStops := append(displayStops, companionStops...)
+	stopIDs := make([]string, 0, len(fetchStops))
+	for _, sd := range fetchStops {
+		stopIDs = append(stopIDs, rows[sd.row].StopID)
+	}
+	depsByStop := h.fetchDeparturesBatch(ctx, stopIDs, now, 30)
+
 	for _, sd := range fetchStops {
 		row := rows[sd.row]
-		deps := h.fetchDepartures(ctx, row.StopID, now, 30)
-		for _, dep := range deps {
-			key := routeKey{dep.RouteID, dep.DirectionID}
+		for _, dep := range depsByStop[row.StopID] {
+			key := routeKey{dep.RouteID, dep.DirectionID, dep.Headsign}
 			if g, ok := groups[key]; ok {
-				if len(g.deps) < 3 {
+				// Later times must come from the group's own stop — a time
+				// from a different nearby stop is not a later departure here.
+				if g.stopID == row.StopID && len(g.deps) < 3 {
 					g.deps = append(g.deps, dep)
 				}
 			} else {
@@ -285,6 +299,12 @@ func (h *Handler) findNearbyRoutes(r *http.Request, lat, lon float64, offset, li
 				order = append(order, key)
 			}
 		}
+	}
+
+	// fetchDepartures returns each stop's departures sorted, but keep the
+	// invariant explicit after grouping.
+	for _, g := range groups {
+		sort.Slice(g.deps, func(i, j int) bool { return g.deps[i].MinutesAway < g.deps[j].MinutesAway })
 	}
 
 	// Build RouteNearbyRows from groups
@@ -440,10 +460,17 @@ func (h *Handler) findNearbyStopsView(r *http.Request, lat, lon float64, offset,
 		nameCounts[rows[s.row].StopName]++
 	}
 
+	// Fetch all page stops' departures with bounded concurrency.
+	pageStopIDs := make([]string, 0, len(pageStops))
+	for _, s := range pageStops {
+		pageStopIDs = append(pageStopIDs, rows[s.row].StopID)
+	}
+	depsByStop := h.fetchDeparturesBatch(ctx, pageStopIDs, now, 30)
+
 	var result []templates.StopViewData
 	for _, s := range pageStops {
 		row := rows[s.row]
-		rg := h.fetchDeparturesForStopView(ctx, row.StopID, now)
+		rg := groupDeparturesForStopView(depsByStop[row.StopID])
 
 		sv := templates.StopViewData{
 			StopID:      row.StopID,
@@ -487,9 +514,14 @@ func formatStopDesc(desc string) string {
 	}
 }
 
-// LocationLabel handles async reverse geocoding for the nearby page location label.
-// Returns an HTML span with the street address, or 204 if unavailable.
-// Caches the result per user — skips the Nominatim call if the user hasn't moved >25m.
+// LocationLabel handles the async location label for the nearby page.
+// Returns an HTML span with a coarse "where am I" label, or 204 if unavailable.
+//
+// When geocoding is enabled (desktop default), it reverse-geocodes via
+// Nominatim using coordinates rounded to ~110 m. When disabled — always the
+// case in the native iPhone build — the label is computed locally from the
+// nearest stop name and no coordinate ever leaves the device.
+// Caches the result per user — skips the lookup if the user hasn't moved >25m.
 func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
 	latStr := r.URL.Query().Get("lat")
 	lonStr := r.URL.Query().Get("lon")
@@ -509,11 +541,21 @@ func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-
-	addr, err := h.geo.Reverse(ctx, lat, lon)
-	if err != nil || addr == "" {
+	var addr string
+	if h.cfg != nil && h.cfg.GeocodeEnabled {
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer cancel()
+		var err error
+		addr, err = h.geo.Reverse(ctx, lat, lon)
+		if err != nil {
+			h.logger.Warn("reverse geocode failed, using local label", "error", err)
+			addr = ""
+		}
+	}
+	if addr == "" {
+		addr = h.localLocationLabel(r.Context(), lat, lon)
+	}
+	if addr == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -522,6 +564,17 @@ func (h *Handler) LocationLabel(w http.ResponseWriter, r *http.Request) {
 	h.locationCache.Store(locationCacheKey, &cachedLocation{Lat: lat, Lon: lon, Address: addr})
 
 	h.renderLocationLabel(w, addr)
+}
+
+// localLocationLabel builds a location label from on-device data only:
+// the name of the nearest stop. Returns "" if no stop is nearby.
+func (h *Handler) localLocationLabel(ctx context.Context, lat, lon float64) string {
+	latDeg, lonDeg := geo.BoundingBoxRadius(lat, 400)
+	rows, err := h.db.NearbyStops(ctx, lat, lon, latDeg, lonDeg, 1)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	return "Near " + rows[0].StopName
 }
 
 func (h *Handler) renderLocationLabel(w http.ResponseWriter, addr string) {

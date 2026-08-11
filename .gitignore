@@ -57,3 +57,6 @@ e2e/*.png
 /ios/Gobus.xcodeproj/
 /ios/Gobus.xcworkspace/
 **/xcuserdata/
+
+# E2E fixture scratch
+e2e/.tmp/

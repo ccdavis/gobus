@@ -11,9 +11,21 @@ left (Phase 4 + polish).
 - `mobile` package bound to `build/GobusKit.xcframework` via gomobile; CGo
   `mattn/go-sqlite3` builds for device + simulator — Phase 2.
 - SwiftUI `WKWebView` shell in `ios/` (XcodeGen `project.yml`), first-launch DB
-  copy, async startup, location prompt, ATS localhost exception — Phase 3.
+  copy, async startup, ATS localhost exception — Phase 3.
 - Verified on the iPhone 16 Pro Simulator: UI renders, geolocation resolves,
   nearby departures populate. See `ios/README.md` to build/run.
+- Code-review fixes (2026-08, `docs/iphone-app-code-review.md`): GTFS
+  service-day correctness after midnight; nearby grouping no longer attributes
+  another stop's times to a stop; bounded-concurrency realtime fetches; empty
+  radius tiers auto-advance on the initial search; schedule freshness on
+  launch/foreground (`MobileRefresh`); startup failure retry UI; WebView
+  navigation policy (local origin only, external links → Safari, WebContent
+  crash recovery); native shell disables PWA manifest/install/service worker;
+  location permission prompts in context instead of at launch; reverse
+  geocoding disabled on iOS (local nearest-stop label; desktop sends only
+  ~110 m-coarse coordinates); SSE connections actually close on idle;
+  saved-location writes confirmed before local state changes; Playwright e2e
+  suite runs against a fixture DB (`make test-e2e`).
 
 ## Remaining
 
@@ -39,24 +51,31 @@ left (Phase 4 + polish).
       should largely work, but verify focus order and the WebView container.
 
 ### Data freshness (Phase 4)
-- [ ] Decide GTFS refresh cadence on device (e.g. on launch if data older than
-      N days). The background scheduler already runs and updates schedule tables
-      in place; confirm it behaves on device and define the trigger.
-- [ ] Optionally background-download a fresh prebuilt DB and swap, vs. running
-      the importer in-process. Must not touch user-settings rows in `gobus.db`.
+- [x] GTFS refresh on device: conditional refresh (imported_at older than 24 h
+      → HEAD check → import) runs after startup and on every foreground via
+      `MobileRefresh()`; failed checks retry on the next foreground.
+- [ ] Split `gobus.db` into a replaceable `schedule.db` and a preserved
+      `user.db` (settings, saved locations). That would let app updates ship a
+      fresh bundled schedule without wiping user data, simplify backup and
+      corruption recovery, and reduce risk during large imports. (Currently a
+      single DB: the first-launch copy is never repeated, so a stale bundled
+      schedule persists until the in-app refresh replaces it.)
 - [ ] Consider shrinking the bundled DB (~153 MB): VACUUM, and drop tables not
       needed at runtime (e.g. `shapes`) to cut app size.
 
 ### Lifecycle / robustness
-- [ ] App lifecycle: optionally stop/restart (or explicitly keep alive) the
-      server on background/foreground via `scenePhase`. Currently left running;
-      iOS suspends it with the app.
+- [x] Foreground hook wired via `scenePhase` (triggers the freshness check).
+      The server itself stays running; iOS suspends it with the app.
+- [x] Startup failure shows an error message with a working Retry button.
 - [ ] Optional promptless geolocation: inject CoreLocation coordinates into
       `navigator.geolocation` via a JS bridge, removing the one-time WebKit
-      geolocation permission prompt. Fallback only — the native bridge works.
+      geolocation permission prompt. Fallback only — the WebKit bridge works.
 
 ### App Store prep
 - [ ] An app bundling an offline transit DB + native location is well past
       guideline 4.2 ("minimum functionality") for WebView apps — low risk.
-- [ ] Screenshots, privacy nutrition label (location: used on-device, not
-      collected), and submission.
+- [ ] Screenshots and submission.
+- [x] Privacy label groundwork: the iOS build never transmits location
+      (reverse geocoding is disabled in the native shell; the nearby label is
+      computed locally), so "location: used on-device, not collected" is now
+      accurate. NexTrip realtime requests are per-stop-ID only.

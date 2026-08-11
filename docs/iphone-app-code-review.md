@@ -1,7 +1,8 @@
 # GoBus iPhone App Code Review
 
 **Review date:** 2026-08-10  
-**Status:** Read-only audit; findings have not yet been fixed  
+**Status:** Findings addressed 2026-08-10 (same day, branch `phone-app`) — see
+the resolution summary at the end of this document.  
 **Scope:** SwiftUI/WKWebView shell, gomobile entry point, embedded Go server,
 GTFS storage and refresh paths, server-rendered web UI, JavaScript behavior,
 accessibility, release configuration, and test tooling.
@@ -568,3 +569,71 @@ When work resumes on the macOS development machine:
 
 This order reduces the risk of shipping incorrect or stale transit information
 before investing in distribution polish.
+
+## Resolution summary (2026-08-10)
+
+All Priority 1 and Priority 2 findings were fixed the same day; Priority 3 was
+fixed except where noted. Highlights:
+
+1. **Location privacy** — reverse geocoding is disabled entirely in the native
+   shell (`mobile` package sets `GeocodeEnabled=false`); the label is computed
+   locally from the nearest stop. On desktop, Nominatim now receives
+   coordinates rounded to 3 decimals (~110 m) at road-level zoom and the label
+   never includes a house number. `GOBUS_GEOCODE=false` disables it anywhere.
+2. **Schedule freshness** — `Scheduler.RefreshIfStale` (imported_at > 24 h →
+   conditional check) runs after startup and on every foreground via the new
+   `MobileRefresh()` binding; `CheckAndUpdate` only marks a day checked after
+   success; the downloader has connect/header/overall timeouts. Covered by
+   `internal/gtfs/scheduler_test.go`.
+3. **Service days** — `gtfsInstant` takes an explicit service date;
+   `scheduledDeparturesForStop` merges the current day and (before 6 AM) the
+   previous service day, sorts by absolute instant. Interval detection uses the
+   same merge. Covered by `TestScheduledDeparturesForStop_PostMidnight`,
+   `_CalendarDates`, and DST tests in `interval_test.go`.
+4. **Nearby grouping** — groups are keyed by route+direction+headsign and later
+   times are only taken from the group's own stop. Covered by
+   `TestNearbyRoutes_LaterTimesFromSameStopOnly`.
+5. **Realtime concurrency** — `fetchDeparturesBatch` (8-way bounded, deduped)
+   plus a 4 s per-request NexTrip timeout. Covered by
+   `TestNearby_SlowRealtimeBounded`.
+6. **Radius auto-advance** — the `newOffset > 0` guard is gone; initial empty
+   searches widen through the tiers. Covered by
+   `TestNearby_InitialEmptyRadiusAdvances`.
+7. **SSE idle** — app.js tracks each element's `EventSource` via `htmx:sseOpen`
+   and closes it explicitly on idle; the idle banner has `tabindex="-1"` so
+   `focus()` works.
+8. **Native WebView** — coordinator implements `WKNavigationDelegate` +
+   `WKUIDelegate`: main frame restricted to the local origin, external links
+   open via `UIApplication.open`, `target="_blank"`/`window.open` handled,
+   load failures retried, WebContent termination reloads.
+9. **Startup retry** — `GobusServer.start()` throws typed errors (including
+   directory-creation failures); the failure view shows the message with a
+   working Retry button.
+10. **route_text_color** — selected, propagated, and rendered for all departure
+    badges. **Trip pattern** — representative trip is now the fullest pattern,
+    tie-broken by trip_id.
+11. **Native vs PWA** — native pages are marked `data-native`; manifest link,
+    apple-web-app meta, install banner, and service-worker registration are
+    all skipped in the native shell.
+12. **Location prompt timing** — `LocationPrimer` is deleted; WebKit raises the
+    permission request when the nearby page first asks, after UI is visible.
+13. **Saved locations** — deletes/migration only mutate local state on
+    confirmed responses; failures are announced via a `role="alert"` element;
+    legacy localStorage is kept until every record is migrated.
+14. **Appearance/cleanup** — forced dark mode removed (system appearance +
+    existing `prefers-color-scheme` CSS); 44 px touch targets on coarse
+    pointers; auth/logout CSS, `CheckResult` validators,
+    `NearbyStopRow.DistanceMeters`, and `allowsInlineMediaPlayback` removed.
+15. **E2E** — `make test-e2e` now runs a real Playwright suite: 
+    `e2e/serve-fixture.mjs` seeds a fixture SQLite DB (times relative to now)
+    and serves it with the real binary under the new `--test-mode` flag
+    (no network); specs cover nearby routes/stops, direction toggle, unit
+    persistence, stop detail, saved locations, and PWA endpoints. A new
+    `--init-db` flag creates the schema for fixtures. (Also fixed while here:
+    `--import-gtfs` previously no-oped when data existed; it now force-updates.)
+
+Deliberately not done: schedule/user DB split (tracked in
+`NATIVE_APP_TODO.md`), app icon and launch screen (need design assets;
+tracked), and signing values remain in `project.yml` (an intentional,
+documented personal-team setup). XCUITest coverage for the Swift shell remains
+open.

@@ -25,9 +25,10 @@ func main() {
 
 	// CLI flags
 	importOnly := flag.Bool("import-gtfs", false, "Download and import GTFS data, then exit")
+	initDBOnly := flag.Bool("init-db", false, "Create/migrate the database schema, then exit (for test fixtures)")
 	flag.StringVar(&cfg.Host, "host", cfg.Host, "Bind address (127.0.0.1 = local-only, 0.0.0.0 = LAN)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
-	flag.BoolVar(&cfg.TestMode, "test-mode", cfg.TestMode, "Enable test mode (fixture data, mock APIs)")
+	flag.BoolVar(&cfg.TestMode, "test-mode", cfg.TestMode, "Test mode: serve existing DB data as-is, no GTFS download or realtime feeds")
 	flag.StringVar(&cfg.GTFSDir, "gtfs-dir", cfg.GTFSDir, "Directory for GTFS data files")
 	flag.Parse()
 	cfg.ImportGTFS = *importOnly
@@ -44,6 +45,12 @@ func main() {
 	}
 	defer db.Close()
 
+	// Handle --init-db flag: storage.Open already ran migrations
+	if *initDBOnly {
+		logger.Info("database initialized", "path", cfg.DBPath)
+		return
+	}
+
 	// Set up GTFS scheduler
 	downloader := gtfs.NewDownloader(cfg.GTFSURL, cfg.GTFSDir, logger)
 	scheduler := gtfs.NewScheduler(downloader, db, logger)
@@ -51,7 +58,7 @@ func main() {
 	// Handle --import-gtfs flag
 	if cfg.ImportGTFS {
 		logger.Info("force importing GTFS data")
-		if err := scheduler.EnsureData(ctx); err != nil {
+		if err := scheduler.ForceUpdate(ctx); err != nil {
 			logger.Error("GTFS import failed", "error", err)
 			os.Exit(1)
 		}
@@ -62,32 +69,42 @@ func main() {
 	// Create NexTrip API client
 	nt := nextrip.NewClient(cfg.NexTripBaseURL, logger)
 
-	// Start GTFS-RT realtime alerts fetcher
+	// Start GTFS-RT realtime alerts fetcher (not in test mode — tests must
+	// not reach external services)
 	rtStore := realtime.NewStore()
-	alertsFetcher := realtime.NewFetcher(
-		"https://svc.metrotransit.org/mtgtfs/alerts.pb",
-		rtStore, logger,
-	)
-	go alertsFetcher.Start(ctx)
+	if !cfg.TestMode {
+		alertsFetcher := realtime.NewFetcher(
+			"https://svc.metrotransit.org/mtgtfs/alerts.pb",
+			rtStore, logger,
+		)
+		go alertsFetcher.Start(ctx)
+	}
 
 	// Start HTTP server (serves loading page until GTFS data is ready)
 	srv := server.New(cfg, db, nt, rtStore, logger)
 
-	// Download GTFS data in the background — server shows loading page until done
-	go func() {
-		if err := scheduler.EnsureData(ctx); err != nil {
-			logger.Error("failed to ensure GTFS data", "error", err)
-		}
+	if cfg.TestMode {
+		// Test mode: serve whatever the database already contains — no GTFS
+		// download, import, or background refresh.
+		logger.Info("test mode: serving existing data, no feed updates")
 		srv.SetReady()
+	} else {
+		// Download GTFS data in the background — server shows loading page until done
+		go func() {
+			if err := scheduler.EnsureData(ctx); err != nil {
+				logger.Error("failed to ensure GTFS data", "error", err)
+			}
+			srv.SetReady()
 
-		// Start background GTFS update scheduler
-		go scheduler.StartBackground(ctx)
+			// Start background GTFS update scheduler
+			go scheduler.StartBackground(ctx)
 
-		// Check for updates on first access today
-		if err := scheduler.CheckAndUpdate(ctx); err != nil {
-			logger.Error("daily GTFS check failed", "error", err)
-		}
-	}()
+			// Check for updates on first access today
+			if err := scheduler.CheckAndUpdate(ctx); err != nil {
+				logger.Error("daily GTFS check failed", "error", err)
+			}
+		}()
+	}
 
 	// Graceful shutdown on SIGINT/SIGTERM
 	go func() {

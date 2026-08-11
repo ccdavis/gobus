@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -90,15 +91,18 @@ func (c *Client) Search(ctx context.Context, query string) (*Result, error) {
 	}, nil
 }
 
-// Reverse performs reverse geocoding: lat/lon → nearest address.
-// Returns a short address string (house number + road), or the full
-// display name if those fields are missing.
+// Reverse performs reverse geocoding: lat/lon → a nearby street name.
+//
+// Privacy: the label only needs to orient the user ("you're near Lake St"),
+// so coordinates are rounded to 3 decimal places (~110 m) before leaving the
+// device, and the result is a road-level label — never a house number, which
+// would imply precision we deliberately didn't send.
 func (c *Client) Reverse(ctx context.Context, lat, lon float64) (string, error) {
 	u := "https://nominatim.openstreetmap.org/reverse?" + url.Values{
-		"lat":            {strconv.FormatFloat(lat, 'f', 6, 64)},
-		"lon":            {strconv.FormatFloat(lon, 'f', 6, 64)},
+		"lat":            {strconv.FormatFloat(coarse(lat), 'f', 3, 64)},
+		"lon":            {strconv.FormatFloat(coarse(lon), 'f', 3, 64)},
 		"format":         {"jsonv2"},
-		"zoom":           {"18"}, // street-level
+		"zoom":           {"17"}, // street level, no building resolution
 		"addressdetails": {"1"},
 	}.Encode()
 
@@ -121,20 +125,24 @@ func (c *Client) Reverse(ctx context.Context, lat, lon float64) (string, error) 
 	var result struct {
 		DisplayName string `json:"display_name"`
 		Address     struct {
-			HouseNumber string `json:"house_number"`
-			Road        string `json:"road"`
+			Road          string `json:"road"`
+			Neighbourhood string `json:"neighbourhood"`
+			Suburb        string `json:"suburb"`
 		} `json:"address"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("nominatim reverse decode: %w", err)
 	}
 
-	// Build a short address: "123 Main St"
+	// Road-level label: "Near Lake St"
 	if result.Address.Road != "" {
-		if result.Address.HouseNumber != "" {
-			return result.Address.HouseNumber + " " + result.Address.Road, nil
-		}
-		return result.Address.Road, nil
+		return "Near " + result.Address.Road, nil
+	}
+	if result.Address.Neighbourhood != "" {
+		return result.Address.Neighbourhood, nil
+	}
+	if result.Address.Suburb != "" {
+		return result.Address.Suburb, nil
 	}
 	// Fallback to first part of display name (before first comma)
 	if result.DisplayName != "" {
@@ -144,4 +152,10 @@ func (c *Client) Reverse(ctx context.Context, lat, lon float64) (string, error) 
 		return result.DisplayName, nil
 	}
 	return "", fmt.Errorf("no address found")
+}
+
+// coarse rounds a coordinate to 3 decimal places (~110 m) so the geocoding
+// service never receives the user's exact position.
+func coarse(v float64) float64 {
+	return math.Round(v*1000) / 1000
 }

@@ -26,7 +26,7 @@ func (db *DB) SetMetadata(ctx context.Context, key, value string) error {
 	return err
 }
 
-// NearbyStopRow represents a stop with its distance from a query point.
+// NearbyStopRow represents a stop returned by an R-Tree bounding-box query.
 type NearbyStopRow struct {
 	StopID             string
 	StopCode           string
@@ -36,7 +36,6 @@ type NearbyStopRow struct {
 	StopLon            float64
 	LocationType       int
 	WheelchairBoarding int
-	DistanceMeters     float64 // Computed after query via Haversine
 }
 
 // NearbyStops finds stops within a bounding box using the R-Tree index.
@@ -79,16 +78,21 @@ func (db *DB) NearbyStops(ctx context.Context, lat, lon, latDeg, lonDeg float64,
 
 // DepartureRow represents a scheduled departure at a stop.
 type DepartureRow struct {
-	TripID        string
-	RouteID       string
-	RouteShort    string
-	RouteLong     string
-	RouteColor    string
-	RouteType     int
-	TripHeadsign  string
-	DirectionID   int
-	DepartureTime string // HH:MM:SS format (can exceed 24:00:00 for next-day trips)
-	StopSequence  int
+	TripID         string
+	RouteID        string
+	RouteShort     string
+	RouteLong      string
+	RouteColor     string
+	RouteTextColor string
+	RouteType      int
+	TripHeadsign   string
+	DirectionID    int
+	DepartureTime  string // HH:MM:SS format (can exceed 24:00:00 for next-day trips)
+	StopSequence   int
+	// ServiceDate is the GTFS service date whose calendar selected this trip.
+	// DepartureTime is relative to this date's noon-minus-12h origin, so a
+	// 25:00:00 departure on service date D is 1:00 AM on D+1.
+	ServiceDate time.Time
 }
 
 // StopSearchResult is a distinct intersection found by a cross-street search.
@@ -155,16 +159,19 @@ func (db *DB) SearchStops(ctx context.Context, query string) ([]StopSearchResult
 	return results, rows.Err()
 }
 
-// DeparturesForStop returns upcoming scheduled departures for a stop on a given date.
-// The date is used to filter by active service (calendar + calendar_dates).
-// afterTime is in HH:MM:SS format.
+// DeparturesForStop returns upcoming scheduled departures for a stop on a given
+// service date. The date is used to filter by active service (calendar +
+// calendar_dates). afterTime is in HH:MM:SS format relative to that service
+// date and may exceed 24:00:00 (e.g. "24:30:00" selects a previous service
+// day's post-midnight trips). Each returned row carries the service date so
+// callers can convert departure times to absolute instants.
 func (db *DB) DeparturesForStop(ctx context.Context, stopID string, date time.Time, afterTime string, limit int) ([]DepartureRow, error) {
 	dateStr := date.Format("20060102")
 	dayCol := dayColumn(date.Weekday())
 
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT st.trip_id, t.route_id, r.route_short_name, r.route_long_name,
-		       r.route_color, r.route_type, t.trip_headsign, t.direction_id,
+		       r.route_color, r.route_text_color, r.route_type, t.trip_headsign, t.direction_id,
 		       st.departure_time, st.stop_sequence
 		FROM stop_times st
 		JOIN trips t ON t.trip_id = st.trip_id
@@ -200,11 +207,14 @@ func (db *DB) DeparturesForStop(ctx context.Context, stopID string, date time.Ti
 	var deps []DepartureRow
 	for rows.Next() {
 		var d DepartureRow
+		var textColor sql.NullString
 		if err := rows.Scan(&d.TripID, &d.RouteID, &d.RouteShort, &d.RouteLong,
-			&d.RouteColor, &d.RouteType, &d.TripHeadsign, &d.DirectionID,
+			&d.RouteColor, &textColor, &d.RouteType, &d.TripHeadsign, &d.DirectionID,
 			&d.DepartureTime, &d.StopSequence); err != nil {
 			return nil, fmt.Errorf("scan departure: %w", err)
 		}
+		d.RouteTextColor = textColor.String
+		d.ServiceDate = date
 		deps = append(deps, d)
 	}
 	return deps, rows.Err()
@@ -263,7 +273,10 @@ func (db *DB) StopsForRoute(ctx context.Context, routeID string, directionID int
 	dateStr := date.Format("20060102")
 	dayCol := dayColumn(date.Weekday())
 
-	// Get a representative trip for this route/direction on this date
+	// Get a representative trip for this route/direction on this date.
+	// Prefer the trip covering the most stops (the fullest pattern — avoids
+	// showing a short-turn or express variant), tie-broken by trip_id so the
+	// choice is deterministic across imports and query-plan changes.
 	var tripID string
 	err := db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT t.trip_id
@@ -283,6 +296,8 @@ func (db *DB) StopsForRoute(ctx context.Context, routeID string, directionID int
 		      WHERE date = ? AND exception_type = 1
 		    )
 		  )
+		ORDER BY (SELECT COUNT(*) FROM stop_times st WHERE st.trip_id = t.trip_id) DESC,
+		         t.trip_id
 		LIMIT 1`, dayCol),
 		routeID, directionID,
 		dateStr, dateStr,

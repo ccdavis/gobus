@@ -32,6 +32,12 @@ func TestFormatGTFSTime(t *testing.T) {
 	}
 }
 
+// minutesUntil is the test shorthand for the two-step conversion the handlers
+// do: GTFS time on now's service date → instant → minutes from now.
+func minutesUntil(gtfsTime string, now time.Time) int {
+	return minutesUntilInstant(gtfsInstant(gtfsTime, now), now)
+}
+
 func TestMinutesUntil(t *testing.T) {
 	now := time.Date(2025, 6, 15, 14, 0, 0, 0, time.Local) // 2:00 PM
 

@@ -64,4 +64,6 @@ make import-gtfs # Force GTFS re-download and import
 - Handlers are thin: data access in `storage/`, external APIs in `nextrip/`/`realtime/`
 - Single-user / no auth: user settings persist in the local SQLite file
 - All templ components must use semantic HTML and ARIA attributes
-- Test GTFS fixtures live in `e2e/fixtures/gtfs/`
+- E2E fixture data is seeded directly into a temp SQLite DB by
+  `e2e/serve-fixture.mjs` (departure times generated relative to now), then
+  served by the real binary with `--test-mode` (no network)

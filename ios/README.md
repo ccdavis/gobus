@@ -9,18 +9,25 @@ A thin SwiftUI shell that runs the shared Go core on-device and points a
 - `project.yml` — [XcodeGen](https://github.com/yonyz/XcodeGen) spec; the source
   of truth for the Xcode project. The `.xcodeproj` is generated, not committed.
 - `Gobus/` — Swift sources:
-  - `GobusApp.swift` — app entry; starts the Go core, loads the WebView.
-  - `GobusServer.swift` — first-launch DB copy + `MobileStart`/`MobileStop`.
-  - `WebView.swift` — `WKWebView` wrapper.
-  - `LocationPrimer.swift` — primes the When-In-Use location prompt.
-  - `Info.plist` — ATS localhost exception + location usage description.
+  - `GobusApp.swift` — app entry; starts the Go core (with retry on failure),
+    loads the WebView, and triggers a schedule-freshness check on foreground.
+  - `GobusServer.swift` — first-launch DB copy +
+    `MobileStart`/`MobileStop`/`MobileRefresh`.
+  - `WebView.swift` — `WKWebView` wrapper; restricts navigation to the local
+    origin, opens external links in Safari, recovers from load failures and
+    WebContent process termination.
+  - `Info.plist` — ATS localhost exception + location usage description. The
+    location prompt appears when the nearby page first asks for geolocation
+    (WebKit bridges it to the app's When-In-Use permission) — the app doesn't
+    pre-prompt at launch.
 
 ## Build inputs (generated, git-ignored)
 
 - `../build/GobusKit.xcframework` — the Go core, gomobile-bound for iOS. The
   framework module is `GobusKit` (kept distinct from the `Gobus` app target to
   avoid a Swift module-name collision); the exported funcs are `MobileStart` /
-  `MobileStop`. Build with `make ios-framework` from the repo root.
+  `MobileStop` / `MobileRefresh`. Build with `make ios-framework` from the repo
+  root.
 - `../dist/gobus.db` — prebuilt SQLite schedule DB, bundled as a read-only
   resource and copied to Application Support on first launch. Build with
   `make prebuilt-db`.

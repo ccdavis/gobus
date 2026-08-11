@@ -3,29 +3,50 @@ package handler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 )
+
+// upcomingRouteInstants returns the absolute instants of all remaining
+// departures for a route/stop/direction, merged across the service days that
+// can still produce departures at `now` (see scheduledDeparturesForStop).
+func (h *Handler) upcomingRouteInstants(ctx context.Context, stopID, routeID string, directionID int, now time.Time) []time.Time {
+	var future []time.Time
+
+	times, err := h.db.AllDeparturesForStopRoute(ctx, stopID, routeID, directionID, now)
+	if err == nil {
+		cutoff := now.Format("15:04:05")
+		for _, t := range times {
+			if t < cutoff {
+				continue
+			}
+			future = append(future, gtfsInstant(t, now))
+		}
+	}
+
+	if now.Hour() < prevServiceDayWindowEndHour {
+		prevDay := now.AddDate(0, 0, -1)
+		cutoff := fmt.Sprintf("%02d:%02d:%02d", now.Hour()+24, now.Minute(), now.Second())
+		times, err := h.db.AllDeparturesForStopRoute(ctx, stopID, routeID, directionID, prevDay)
+		if err == nil {
+			for _, t := range times {
+				if t < cutoff {
+					continue
+				}
+				future = append(future, gtfsInstant(t, prevDay))
+			}
+		}
+	}
+
+	sort.Slice(future, func(i, j int) bool { return future[i].Before(future[j]) })
+	return future
+}
 
 // detectInterval examines all remaining departures today for a route/stop/direction
 // and returns a human-readable interval string like "Every 20 min until 8:00 PM".
 // Returns empty string if no regular interval is detected.
 func (h *Handler) detectInterval(ctx context.Context, stopID, routeID string, directionID int, now time.Time) string {
-	times, err := h.db.AllDeparturesForStopRoute(ctx, stopID, routeID, directionID, now)
-	if err != nil || len(times) < 3 {
-		return ""
-	}
-
-	// Parse times and filter to future only
-	currentTime := now.Format("15:04:05")
-	var futureTimes []time.Time
-	for _, t := range times {
-		if t < currentTime {
-			continue
-		}
-		parsed := parseGTFSTime(t, now)
-		futureTimes = append(futureTimes, parsed)
-	}
-
+	futureTimes := h.upcomingRouteInstants(ctx, stopID, routeID, directionID, now)
 	if len(futureTimes) < 3 {
 		return ""
 	}
@@ -93,12 +114,6 @@ func (h *Handler) detectInterval(ctx context.Context, stopID, routeID string, di
 	endTime := futureTimes[endIdx]
 
 	return fmt.Sprintf("Every %d min until %s", rounded, endTime.Format("3:04 PM"))
-}
-
-// parseGTFSTime converts "HH:MM:SS" (possibly >24h) to the absolute instant it
-// represents on now's service date. See gtfsInstant for the DST handling.
-func parseGTFSTime(gtfsTime string, now time.Time) time.Time {
-	return gtfsInstant(gtfsTime, now)
 }
 
 func abs(x int) int {

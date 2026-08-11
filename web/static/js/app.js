@@ -4,8 +4,15 @@
 (function () {
   'use strict';
 
+  // Native app shell (iOS WKWebView): the server marks the page with
+  // data-native. PWA behavior — service worker, page caching, install
+  // prompts — is browser-only and must not run inside the installed app
+  // (each native launch uses a random local port, i.e. a different origin,
+  // so caches would fragment and never be cleaned up).
+  var isNativeShell = document.documentElement.hasAttribute('data-native');
+
   // --- Service Worker Registration ---
-  if ('serviceWorker' in navigator) {
+  if (!isNativeShell && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(function () { console.log('SW registered'); })
       .catch(function (err) { console.warn('SW registration failed:', err); });
@@ -52,9 +59,19 @@
 
   function removeSavedLocation(stopID) {
     return fetch('/api/saved/' + encodeURIComponent(stopID), { method: 'DELETE' })
-      .then(function () {
-        savedLocations = savedLocations.filter(function (l) { return l.stopID !== stopID; });
-      }).catch(function () { /* ignore */ });
+      .then(function (r) {
+        // Only drop the local copy once the server confirmed the delete;
+        // otherwise the UI would claim a removal that didn't happen.
+        if (r && r.ok) {
+          savedLocations = savedLocations.filter(function (l) { return l.stopID !== stopID; });
+          return true;
+        }
+        announceSavedError('Couldn’t remove the saved location. Please try again.');
+        return false;
+      }).catch(function () {
+        announceSavedError('Couldn’t remove the saved location. Please try again.');
+        return false;
+      });
   }
 
   function isSaved(stopID) {
@@ -64,17 +81,52 @@
     return false;
   }
 
+  // Announce a saved-locations failure to all users (visible + role=alert)
+  // instead of silently swallowing it.
+  function announceSavedError(msg) {
+    var el = document.getElementById('saved-error');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'saved-error';
+      el.className = 'saved-error';
+      el.setAttribute('role', 'alert');
+      var container = document.getElementById('saved-locations');
+      if (container) {
+        container.removeAttribute('hidden');
+        container.appendChild(el);
+      } else {
+        document.body.appendChild(el);
+      }
+    }
+    el.textContent = msg;
+  }
+
   // One-time migration of any locations left in localStorage into the DB.
+  // localStorage is only cleared after every record has been confirmed
+  // written — until then it remains the durable copy, so a failed migration
+  // retries on a later page load instead of losing the data.
   function migrateLegacySaved() {
-    if (savedLocations.length) return;
+    if (savedLocations.length) return Promise.resolve();
     var raw;
-    try { raw = localStorage.getItem(LEGACY_STORAGE_KEY); } catch (e) { return; }
-    if (!raw) return;
+    try { raw = localStorage.getItem(LEGACY_STORAGE_KEY); } catch (e) { return Promise.resolve(); }
+    if (!raw) return Promise.resolve();
     var legacy;
-    try { legacy = JSON.parse(raw); } catch (e) { return; }
-    if (!legacy || !legacy.length) return;
-    legacy.forEach(function (loc) { apiAddSaved(loc); savedLocations.push(loc); });
-    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* ignore */ }
+    try { legacy = JSON.parse(raw); } catch (e) { return Promise.resolve(); }
+    if (!legacy || !legacy.length) return Promise.resolve();
+
+    return Promise.all(legacy.map(function (loc) {
+      return apiAddSaved(loc)
+        .then(function (r) {
+          if (r && r.ok) { savedLocations.push(loc); return true; }
+          return false;
+        })
+        .catch(function () { return false; });
+    })).then(function (results) {
+      var allOK = results.every(function (ok) { return ok; });
+      if (allOK) {
+        try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* ignore */ }
+      }
+    });
   }
 
   // Render saved location buttons on the nearby page
@@ -173,7 +225,8 @@
   // Load saved locations from the DB, then render and sync the save button.
   apiGetSaved().then(function (list) {
     savedLocations = Array.isArray(list) ? list : [];
-    migrateLegacySaved();
+    return migrateLegacySaved();
+  }).then(function () {
     renderSavedLocations();
     updateSaveStopButton();
   });
@@ -462,21 +515,37 @@
   var IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
   var idleTimer = null;
 
+  // Track each element's live EventSource. The htmx SSE extension only closes
+  // sources when the element is removed from the DOM (htmx:beforeCleanupElement)
+  // — removing the sse-connect attribute does NOT close the underlying
+  // connection, so we must close it ourselves on idle or connections pile up
+  // across idle/wake cycles.
+  document.body.addEventListener('htmx:sseOpen', function (e) {
+    if (e.target && e.detail && e.detail.source) {
+      e.target._gobusSSESource = e.detail.source;
+    }
+  });
+
   function resetIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(onIdle, IDLE_TIMEOUT_MS);
   }
 
   function onIdle() {
-    // Close all SSE connections by removing the sse-connect attributes
+    // Close all SSE connections: close the EventSource explicitly, then strip
+    // the attribute so htmx doesn't reconnect until the user wakes the page.
     var sseElements = document.querySelectorAll('[sse-connect]');
     sseElements.forEach(function (el) {
       var url = el.getAttribute('sse-connect');
       el.removeAttribute('sse-connect');
       el.setAttribute('data-sse-was', url);
+      if (el._gobusSSESource) {
+        try { el._gobusSSESource.close(); } catch (e) { /* already closed */ }
+        el._gobusSSESource = null;
+      }
     });
 
-    // Show wake-up banner
+    // Show wake-up banner and move focus to it (it has tabindex="-1")
     var banner = document.getElementById('idle-banner');
     if (banner) {
       banner.removeAttribute('hidden');

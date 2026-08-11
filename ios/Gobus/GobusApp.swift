@@ -3,41 +3,66 @@ import SwiftUI
 @main
 struct GobusApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             ContentView(model: model)
-                .preferredColorScheme(.dark)
                 .ignoresSafeArea(.keyboard)
                 .task { model.start() }
+                .onChange(of: scenePhase) { phase in
+                    // Keep bundled schedule data fresh: iOS suspends the
+                    // process, so refresh rides on foregrounding instead of a
+                    // background timer.
+                    if phase == .active { GobusServer.refreshIfStale() }
+                }
         }
     }
 }
 
-/// Owns app-level startup: primes the location prompt and brings up the Go core
-/// off the main thread (the first-launch DB copy + open must not block launch),
-/// publishing the bound port for the WebView to load.
+/// Owns app-level startup: brings up the Go core off the main thread (the
+/// first-launch DB copy + open must not block launch), publishing the bound
+/// port for the WebView to load. Location permission is NOT requested here —
+/// the nearby page's geolocation call triggers the system prompt once the user
+/// actually sees the app.
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase: Equatable {
         case starting
         case running(port: Int)
-        case failed
+        case failed(message: String)
     }
 
     @Published var phase: Phase = .starting
-    private var didStart = false
+    private var starting = false
 
     func start() {
-        guard !didStart else { return }
-        didStart = true
-        LocationPrimer.shared.request()
+        guard !starting, !isRunning else { return }
+        starting = true
+        phase = .starting
         Task.detached(priority: .userInitiated) {
-            let port = GobusServer.start()
+            let result: Result<Int, Error> = Result { try GobusServer.start() }
             await MainActor.run {
-                self.phase = port > 0 ? .running(port: port) : .failed
+                self.starting = false
+                switch result {
+                case .success(let port):
+                    self.phase = .running(port: port)
+                case .failure(let error):
+                    let message = (error as? GobusServer.StartError)?.message
+                        ?? "GoBus couldn’t start."
+                    self.phase = .failed(message: message)
+                }
             }
         }
+    }
+
+    func retry() {
+        start()
+    }
+
+    private var isRunning: Bool {
+        if case .running = phase { return true }
+        return false
     }
 }
 
@@ -51,7 +76,7 @@ struct ContentView: View {
                 WebView(url: url)
                     .ignoresSafeArea(edges: .bottom)
             } else {
-                message("Couldn’t reach GoBus.")
+                failure("Couldn’t reach GoBus.")
             }
         case .starting:
             VStack(spacing: 12) {
@@ -59,16 +84,22 @@ struct ContentView: View {
                 Text("Starting GoBus…").foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
-        case .failed:
-            message("GoBus couldn’t start.")
+            .background(Color(.systemBackground))
+        case .failed(let message):
+            failure(message)
         }
     }
 
-    private func message(_ text: String) -> some View {
-        Text(text)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+    private func failure(_ text: String) -> some View {
+        VStack(spacing: 16) {
+            Text(text)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again") { model.retry() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }

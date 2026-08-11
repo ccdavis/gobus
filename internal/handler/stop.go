@@ -39,7 +39,7 @@ func (h *Handler) StopDetail(w http.ResponseWriter, r *http.Request) {
 	if len(departures) > 0 {
 		dep := departures[0]
 		// Look up direction from the scheduled data
-		depRows, _ := h.db.DeparturesForStop(ctx, stopID, now, now.Format("15:04:05"), 1)
+		depRows := h.scheduledDeparturesForStop(ctx, stopID, now, 1)
 		if len(depRows) > 0 {
 			interval = h.detectInterval(ctx, stopID, dep.RouteID, depRows[0].DirectionID, now)
 		}
@@ -88,23 +88,24 @@ func formatGTFSTime(gtfsTime string) string {
 
 // gtfsInstant converts a GTFS "HH:MM:SS" departure time (which may exceed
 // 24:00:00 for trips after midnight) into the absolute instant it represents on
-// now's service date, in now's location.
+// the given service date, in that date's location. A 25:00:00 departure on
+// service date D is 1:00 AM on D+1.
 //
 // It builds a wall-clock time via time.Date so the correct zone offset —
 // including daylight saving — is applied for that moment. Computing it as
 // "midnight + duration" is wrong across a DST transition: on the spring-forward
 // day a duration spanning the 2 AM jump lands an hour late, which scrambles
 // minutes-away, departure sorting, and late detection. (Bug observed in March.)
-func gtfsInstant(gtfsTime string, now time.Time) time.Time {
+func gtfsInstant(gtfsTime string, serviceDate time.Time) time.Time {
 	var h, m, s int
 	fmt.Sscanf(gtfsTime, "%d:%d:%d", &h, &m, &s)
-	y, mo, d := now.Date()
-	return time.Date(y, mo, d+h/24, h%24, m, s, 0, now.Location())
+	y, mo, d := serviceDate.Date()
+	return time.Date(y, mo, d+h/24, h%24, m, s, 0, serviceDate.Location())
 }
 
-// minutesUntil calculates minutes from now until a GTFS time on the current day.
-func minutesUntil(gtfsTime string, now time.Time) int {
-	diff := gtfsInstant(gtfsTime, now).Sub(now)
+// minutesUntilInstant returns whole minutes from now until t, floored at zero.
+func minutesUntilInstant(t, now time.Time) int {
+	diff := t.Sub(now)
 	if diff < 0 {
 		return 0
 	}

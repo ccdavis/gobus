@@ -15,6 +15,16 @@ type Config struct {
 	NexTripBaseURL string
 	TestMode       bool
 	ImportGTFS     bool // CLI flag: force GTFS re-import
+	// GeocodeEnabled allows network reverse geocoding (Nominatim) for the
+	// nearby-page location label. When false, coordinates never leave the
+	// device and a locally computed label (nearest stop) is used instead.
+	// The native iPhone build forces this off.
+	GeocodeEnabled bool
+	// NativeShell is true when the server runs inside the native app shell
+	// (iOS WKWebView). It disables browser-PWA behavior — manifest links,
+	// install prompts, and service-worker registration — that make no sense
+	// in an installed native app.
+	NativeShell bool
 }
 
 // Load reads configuration from environment variables with defaults.
@@ -27,6 +37,7 @@ func Load() *Config {
 		GTFSURL:        envStr("GOBUS_GTFS_URL", "https://svc.metrotransit.org/mtgtfs/gtfs.zip"),
 		NexTripBaseURL: envStr("GOBUS_NEXTRIP_URL", "https://svc.metrotransit.org/nextrip"),
 		TestMode:       envBool("GOBUS_TEST_MODE", false),
+		GeocodeEnabled: envBool("GOBUS_GEOCODE", true),
 	}
 }
 

@@ -91,6 +91,7 @@ func (h *Handler) page(title, currentPath string) templates.Page {
 		CurrentPath:  currentPath,
 		AssetVersion: h.version,
 		DistanceUnit: unit,
+		NativeShell:  h.cfg != nil && h.cfg.NativeShell,
 	}
 }
 

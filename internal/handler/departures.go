@@ -4,25 +4,84 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"gobus/internal/nextrip"
+	"gobus/internal/storage"
 	"gobus/internal/templates"
 )
+
+// nextripTimeout bounds a single realtime lookup. The schedule renders without
+// realtime data, so a slow NexTrip response must degrade the page, not stall it.
+const nextripTimeout = 4 * time.Second
+
+// maxDepartureFetches bounds how many stops fetch departures concurrently in
+// fetchDeparturesBatch.
+const maxDepartureFetches = 8
+
+// prevServiceDayWindowEndHour bounds the post-midnight window during which the
+// previous GTFS service day can still have upcoming departures. GTFS times may
+// exceed 24:00:00 (a Sunday-service 25:00:00 trip runs Monday 1:00 AM); Metro
+// Transit's feed tops out around 27:xx, so past 6 AM (= 30:00 on the previous
+// service day) there is nothing left to find.
+const prevServiceDayWindowEndHour = 6
+
+// schedDeparture pairs a scheduled departure row with the absolute instant it
+// occurs, derived from the service date whose calendar selected the trip.
+type schedDeparture struct {
+	storage.DepartureRow
+	Instant time.Time
+}
+
+// scheduledDeparturesForStop returns upcoming scheduled departures for a stop,
+// merged across the GTFS service days that can still produce departures at
+// `now`: the current calendar day and — in the early-morning window — the
+// previous service day, whose over-24h trip times spill past midnight.
+// Results are sorted by absolute instant and truncated to limit.
+func (h *Handler) scheduledDeparturesForStop(ctx context.Context, stopID string, now time.Time, limit int) []schedDeparture {
+	var merged []schedDeparture
+
+	rows, err := h.db.DeparturesForStop(ctx, stopID, now, now.Format("15:04:05"), limit)
+	if err != nil {
+		h.logger.Error("fetching scheduled departures", "stop", stopID, "error", err)
+	}
+	for _, r := range rows {
+		merged = append(merged, schedDeparture{r, gtfsInstant(r.DepartureTime, r.ServiceDate)})
+	}
+
+	if now.Hour() < prevServiceDayWindowEndHour {
+		prevDay := now.AddDate(0, 0, -1)
+		// "now" expressed as the previous service day's over-24h clock.
+		after := fmt.Sprintf("%02d:%02d:%02d", now.Hour()+24, now.Minute(), now.Second())
+		rows, err := h.db.DeparturesForStop(ctx, stopID, prevDay, after, limit)
+		if err != nil {
+			h.logger.Error("fetching previous-service-day departures", "stop", stopID, "error", err)
+		}
+		for _, r := range rows {
+			merged = append(merged, schedDeparture{r, gtfsInstant(r.DepartureTime, r.ServiceDate)})
+		}
+	}
+
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Instant.Before(merged[j].Instant) })
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged
+}
 
 // fetchDepartures gets merged scheduled + realtime departures for a stop.
 // Returns up to `limit` departures sorted by time.
 func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.Time, limit int) []templates.DepartureInfo {
-	// 1. Get scheduled departures from GTFS
-	afterTime := now.Format("15:04:05")
-	schedRows, err := h.db.DeparturesForStop(ctx, stopID, now, afterTime, limit*2)
-	if err != nil {
-		h.logger.Error("fetching scheduled departures", "stop", stopID, "error", err)
-	}
+	// 1. Get scheduled departures from GTFS (service-day aware)
+	schedRows := h.scheduledDeparturesForStop(ctx, stopID, now, limit*2)
 
-	// 2. Get realtime departures from NexTrip API
+	// 2. Get realtime departures from NexTrip API, bounded by its own short
+	// timeout so an unresponsive upstream can't stall the page.
 	var rtDeps []nextrip.Departure
-	ntResp, err := h.nt.DeparturesForStop(ctx, stopID)
+	ntCtx, ntCancel := context.WithTimeout(ctx, nextripTimeout)
+	ntResp, err := h.nt.DeparturesForStop(ntCtx, stopID)
+	ntCancel()
 	if err != nil {
 		h.logger.Warn("NexTrip API unavailable, using schedule only", "stop", stopID, "error", err)
 	} else {
@@ -47,7 +106,7 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 
 	for _, sched := range schedRows {
 		scheduledTime := formatGTFSTime(sched.DepartureTime)
-		minutesAway := minutesUntil(sched.DepartureTime, now)
+		minutesAway := minutesUntilInstant(sched.Instant, now)
 
 		// Use route_short_name, fall back to route_long_name
 		routeShort := sched.RouteShort
@@ -56,13 +115,14 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 		}
 
 		dep := templates.DepartureInfo{
-			RouteID:     sched.RouteID,
-			RouteShort:  routeShort,
-			RouteColor:  sched.RouteColor,
-			Headsign:    sched.TripHeadsign,
-			DirectionID: sched.DirectionID,
-			Scheduled:   scheduledTime,
-			MinutesAway: minutesAway,
+			RouteID:        sched.RouteID,
+			RouteShort:     routeShort,
+			RouteColor:     sched.RouteColor,
+			RouteTextColor: sched.RouteTextColor,
+			Headsign:       sched.TripHeadsign,
+			DirectionID:    sched.DirectionID,
+			Scheduled:      scheduledTime,
+			MinutesAway:    minutesAway,
 		}
 
 		// Try to get direction text from NexTrip data for this route+direction
@@ -85,7 +145,7 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 					dep.MinutesAway = 0
 				}
 				// Check if late (realtime > scheduled by 2+ minutes)
-				schedMins := minutesUntil(sched.DepartureTime, now)
+				schedMins := minutesUntilInstant(sched.Instant, now)
 				dep.IsLate = dep.MinutesAway > schedMins+2
 			}
 			seen[sched.TripID] = true
@@ -131,11 +191,40 @@ func (h *Handler) fetchDepartures(ctx context.Context, stopID string, now time.T
 	return result
 }
 
-// fetchDeparturesForStopView returns departures grouped by route+direction
-// with individual time entries (for the stops-centric nearby view).
-func (h *Handler) fetchDeparturesForStopView(ctx context.Context, stopID string, now time.Time) []templates.StopRouteGroup {
-	allDeps := h.fetchDepartures(ctx, stopID, now, 30)
+// fetchDeparturesBatch fetches merged scheduled + realtime departures for
+// several stops with bounded concurrency, so page latency approaches the
+// slowest single lookup instead of the sum of all of them. Duplicate stop IDs
+// are fetched once. A stop whose fetch yields nothing simply has no entry.
+func (h *Handler) fetchDeparturesBatch(ctx context.Context, stopIDs []string, now time.Time, limit int) map[string][]templates.DepartureInfo {
+	results := make(map[string][]templates.DepartureInfo, len(stopIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxDepartureFetches)
+	seen := make(map[string]bool, len(stopIDs))
 
+	for _, id := range stopIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			deps := h.fetchDepartures(ctx, id, now, limit)
+			mu.Lock()
+			results[id] = deps
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return results
+}
+
+// groupDeparturesForStopView groups one stop's departures by route+direction
+// with individual time entries (for the stops-centric nearby view).
+func groupDeparturesForStopView(allDeps []templates.DepartureInfo) []templates.StopRouteGroup {
 	type routeKey struct {
 		routeID     string
 		directionID int

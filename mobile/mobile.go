@@ -39,6 +39,8 @@ var (
 	srv    *server.Server
 	db     *storage.DB
 	cancel context.CancelFunc
+	sched  *gtfs.Scheduler
+	runCtx context.Context
 )
 
 // Start opens the SQLite database at dbPath, begins serving GoBus on
@@ -65,6 +67,11 @@ func Start(dbPath, dataDir string, port int) (int, error) {
 	cfg.Port = port
 	cfg.DBPath = dbPath
 	cfg.GTFSDir = dataDir
+	// Native shell: location must never leave the device (the App Store
+	// privacy label says location is used on-device only), and browser-PWA
+	// behavior is meaningless inside an installed app.
+	cfg.GeocodeEnabled = false
+	cfg.NativeShell = true
 
 	database, err := storage.Open(dbPath, logger)
 	if err != nil {
@@ -80,13 +87,19 @@ func Start(dbPath, dataDir string, port int) (int, error) {
 	s := server.New(cfg, database, nt, rtStore, logger)
 
 	// Ensure schedule data exists (no-op when the bundled DB already has it),
-	// then keep it fresh in the background.
+	// then keep it fresh. iOS suspends the process long before the 3 AM
+	// background timer fires, so freshness rides on app usage: a conditional
+	// refresh runs after startup and on every foreground (via Refresh),
+	// asynchronously so existing data renders immediately.
 	scheduler := gtfs.NewScheduler(gtfs.NewDownloader(cfg.GTFSURL, cfg.GTFSDir, logger), database, logger)
 	go func() {
 		if err := scheduler.EnsureData(ctx); err != nil {
 			logger.Error("ensure GTFS data", "error", err)
 		}
 		s.SetReady()
+		if err := scheduler.RefreshIfStale(ctx); err != nil {
+			logger.Warn("GTFS launch refresh failed; will retry on next foreground", "error", err)
+		}
 		scheduler.StartBackground(ctx)
 	}()
 
@@ -103,7 +116,26 @@ func Start(dbPath, dataDir string, port int) (int, error) {
 	}()
 
 	srv, db, cancel = s, database, cancelFn
+	sched, runCtx = scheduler, ctx
 	return actualPort, nil
+}
+
+// Refresh triggers a conditional schedule-data refresh when the imported data
+// is stale (older than ~24h). The Swift shell calls this whenever the app
+// returns to the foreground. Non-blocking; no-op when the server isn't running,
+// data is fresh, or a check already ran today.
+func Refresh() {
+	mu.Lock()
+	s, ctx := sched, runCtx
+	mu.Unlock()
+	if s == nil {
+		return
+	}
+	go func() {
+		if err := s.RefreshIfStale(ctx); err != nil {
+			slog.Default().Warn("gobus foreground refresh failed", "error", err)
+		}
+	}()
 }
 
 // Stop gracefully shuts down the server, stops background fetchers, and closes
@@ -124,4 +156,5 @@ func Stop() {
 	db.Close()
 
 	srv, db, cancel = nil, nil, nil
+	sched, runCtx = nil, nil
 }

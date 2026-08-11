@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Downloader handles GTFS zip file downloads with conditional requests.
@@ -21,7 +23,16 @@ type Downloader struct {
 // NewDownloader creates a Downloader for the given GTFS URL.
 func NewDownloader(url, dir string, logger *slog.Logger) *Downloader {
 	return &Downloader{
-		client: &http.Client{},
+		// The GTFS zip is ~30 MB; allow a slow cellular download but never
+		// hang forever. Connection setup gets its own tighter bound.
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+			},
+		},
 		url:    url,
 		dir:    dir,
 		logger: logger,
@@ -30,9 +41,7 @@ func NewDownloader(url, dir string, logger *slog.Logger) *Downloader {
 
 // CheckResult holds the result of a conditional check.
 type CheckResult struct {
-	NeedsUpdate  bool
-	LastModified string
-	ETag         string
+	NeedsUpdate bool
 }
 
 // Check sends a HEAD request with If-Modified-Since to see if the feed has changed.
@@ -59,11 +68,9 @@ func (d *Downloader) Check(ctx context.Context, lastModified, etag string) (*Che
 		return &CheckResult{NeedsUpdate: false}, nil
 	}
 
-	return &CheckResult{
-		NeedsUpdate:  true,
-		LastModified: resp.Header.Get("Last-Modified"),
-		ETag:         resp.Header.Get("ETag"),
-	}, nil
+	// The validators stored after import come from the subsequent GET's
+	// response headers, not from this HEAD.
+	return &CheckResult{NeedsUpdate: true}, nil
 }
 
 // Download fetches the GTFS zip and saves it to a temp file.

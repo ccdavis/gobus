@@ -18,8 +18,15 @@ type Scheduler struct {
 	logger     *slog.Logger
 
 	mu            sync.Mutex
-	lastCheckDate string // YYYY-MM-DD of last check, prevents multiple checks per day
+	lastCheckDate string // YYYY-MM-DD of last successful check, prevents multiple checks per day
+	checking      bool   // a check/update is in flight
 }
+
+// staleAfter is how old imported schedule data may get before a foreground
+// launch triggers a conditional refresh. The 3 AM background timer handles
+// always-running desktop processes; iOS suspends the app, so refresh has to
+// piggyback on app usage instead.
+const staleAfter = 24 * time.Hour
 
 // NewScheduler creates a Scheduler.
 func NewScheduler(downloader *Downloader, db *storage.DB, logger *slog.Logger) *Scheduler {
@@ -42,17 +49,31 @@ func (s *Scheduler) EnsureData(ctx context.Context) error {
 	return s.update(ctx)
 }
 
+// ForceUpdate unconditionally downloads and imports the feed, replacing any
+// existing data. Used by the --import-gtfs CLI flag.
+func (s *Scheduler) ForceUpdate(ctx context.Context) error {
+	return s.update(ctx)
+}
+
 // CheckAndUpdate checks if the feed has been updated and imports it if so.
-// Only checks once per calendar day.
+// Checks at most once per calendar day — but a day only counts as checked
+// once the check (and any resulting import) succeeds, so a network failure
+// is retried on the next call rather than silently skipped until tomorrow.
 func (s *Scheduler) CheckAndUpdate(ctx context.Context) error {
-	s.mu.Lock()
 	today := time.Now().In(chicagoTZ()).Format("2006-01-02")
-	if s.lastCheckDate == today {
+
+	s.mu.Lock()
+	if s.lastCheckDate == today || s.checking {
 		s.mu.Unlock()
 		return nil
 	}
-	s.lastCheckDate = today
+	s.checking = true
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.checking = false
+		s.mu.Unlock()
+	}()
 
 	lastModified, _ := s.db.GetMetadata(ctx, "last_modified")
 	etag, _ := s.db.GetMetadata(ctx, "etag")
@@ -61,11 +82,32 @@ func (s *Scheduler) CheckAndUpdate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !result.NeedsUpdate {
-		return nil
+	if result.NeedsUpdate {
+		if err := s.update(ctx); err != nil {
+			return err
+		}
 	}
 
-	return s.update(ctx)
+	s.mu.Lock()
+	s.lastCheckDate = today
+	s.mu.Unlock()
+	return nil
+}
+
+// RefreshIfStale triggers a conditional feed check when the imported data is
+// older than staleAfter (or its age is unknown). Called on app launch and
+// foreground so schedule data stays current on devices — like iPhones — where
+// the process is suspended long before the 3 AM background timer fires.
+// Safe to call often; it no-ops when data is fresh or a check already ran today.
+func (s *Scheduler) RefreshIfStale(ctx context.Context) error {
+	importedAt, _ := s.db.GetMetadata(ctx, "imported_at")
+	if importedAt != "" {
+		if t, err := time.Parse(time.RFC3339, importedAt); err == nil && time.Since(t) < staleAfter {
+			return nil
+		}
+	}
+	s.logger.Info("schedule data stale, checking for feed update", "imported_at", importedAt)
+	return s.CheckAndUpdate(ctx)
 }
 
 // StartBackground starts the 3 AM daily check goroutine.
